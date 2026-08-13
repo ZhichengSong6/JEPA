@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Training / experiment logs
+lightning_logs/
+logs/
+wandb/
+
+# Model checkpoints
+*.ckpt
+*.pt
+*.pth
+
+# Videos / generated outputs
+*.mp4
+*.gif
+
+# Generated environment files
+environment.json
+requirements_frozen_v2.txt
+
+# Hydra
+outputs/
+multirun/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Shell scripts
+*.sh
+*.sbatch
+
+# Generated versioned environment dumps
+environment_v[2-9]*.json
+requirements_frozen_v[2-9]*.txt
+
+# Generated versioned environment dumps
+environment_v[2-9]*.json
+requirements_frozen_v[2-9]*.txt

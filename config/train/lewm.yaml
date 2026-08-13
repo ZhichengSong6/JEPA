@@ -1,0 +1,93 @@
+defaults:
+  - _self_
+  - data: pusht
+
+output_model_name: lewm
+subdir: ${hydra:job.id}
+
+num_workers: 6
+train_split: 0.9
+seed: 3072
+img_size: 224
+patch_size: 14
+encoder_scale: tiny
+dump_object: True
+
+trainer:
+  max_epochs: 100
+  devices: auto
+  accelerator: gpu
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 128
+  num_workers: ${num_workers}
+  persistent_workers: True
+  prefetch_factor: 3
+  pin_memory: True
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+wandb:
+  enabled: True
+  config:
+    entity: lewm
+    project: lewm
+    name: ${output_model_name}
+    id: ${subdir}
+    resume: allow
+    log_model: False
+
+wm:
+  type: lewm
+  history_size: 3
+  num_preds: 1
+  embed_dim: 192
+
+predictor:
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0
+
+loss:
+  sigreg:
+    weight: 0.09
+    kwargs:
+      knots: 17
+      num_proj: 1024
+
+
+# Optional full-PushT physical factor supervision.
+# disabled => exact original LeWM objective / architecture.
+# enabled  => training-only heads for pusher XY, block XY, and block rotation.
+# CEM never reads these heads; jepa.py criterion() remains raw-latent MSE.
+factor:
+  enabled: False
+  world_size: 512.0
+  head_hidden_dim: 256
+  head_depth: 2
+
+  # Same outer auxiliary weights used in the simplified factor experiment.
+  encoded_weight: 0.10
+  predicted_weight: 0.05
+  metric_weight: 0.05
+
+  # The three 2-D factors are ALWAYS averaged equally (1/3 each) in train.py.
+  theta_norm_weight: 0.05
+  metric_smooth_l1_beta: 0.05
+
+  # Fixed normalization statistics derived once from the raw training states.
+  # These are data statistics, not tuned planning/model hyperparameters.
+  metric_scale_quantile: 0.95
+  metric_scale_num_pairs: 200000
+  metric_scales:
+    pusher: 1.0
+    block: 1.0
+    theta: 1.0
