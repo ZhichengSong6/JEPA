@@ -38,7 +38,13 @@ def get_episodes_length(dataset, episodes):
 
 
 def get_dataset(cfg, dataset_name):
-    dataset_path = Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+    # `cache_dir` is injected in the normal Hydra-composed eval path, but
+    # standalone diagnostics may load config/eval/pusht.yaml directly with
+    # OmegaConf.load(), in which case that optional top-level key is absent.
+    # Fall back to stable-worldmodel's cache directory (STABLEWM_HOME) without
+    # changing the official Hydra behavior when cache_dir is present.
+    cache_dir = cfg.get("cache_dir", None)
+    dataset_path = Path(cache_dir or swm.data.utils.get_cache_dir())
     dataset = swm.data.HDF5Dataset(
         dataset_name,
         keys_to_cache=cfg.dataset.keys_to_cache,
