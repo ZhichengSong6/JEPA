@@ -116,8 +116,22 @@ class JEPA(nn.Module):
 
     def criterion(self, info_dict: dict):
         """Compute the cost between predicted embeddings and goal embeddings."""
-        pred_emb = info_dict["predicted_emb"]  # (B,S, T-1, dim)
-        goal_emb = info_dict["goal_emb"]  # (B, S, T, dim)
+        pred_emb = info_dict["predicted_emb"]  # (B, S, T, D)
+        goal_emb = info_dict["goal_emb"]       # (B, T_goal, D) or (B, S, T_goal, D)
+
+        # get_cost() encodes one goal trajectory per environment, whereas
+        # predicted_emb additionally carries a planning-sample dimension S.
+        # Explicitly insert that sample dimension before broadcasting.  The
+        # previous code relied on implicit broadcasting that happened to work
+        # when planner batch size B=1 (the official CEM setting), but failed
+        # for B>1.  For B=1 this is numerically identical to the old behavior.
+        if goal_emb.ndim == pred_emb.ndim - 1:
+            goal_emb = goal_emb.unsqueeze(1)
+        if goal_emb.ndim != pred_emb.ndim:
+            raise RuntimeError(
+                f"Unexpected goal/pred embedding shapes: goal={tuple(goal_emb.shape)}, "
+                f"pred={tuple(pred_emb.shape)}"
+            )
 
         goal_emb = goal_emb[..., -1:, :].expand_as(pred_emb)
 
