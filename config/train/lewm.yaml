@@ -86,7 +86,9 @@ stage1:
   # action-response directions. This targets J_hat^T e_H without allowing the
   # auxiliary loss to win by collapsing action sensitivity.
   action_projected_bias_weight: 1.0
-  perturb_radius: 0.10
+  # Match the smallest perturbation radius used in the fixed-action H=5
+  # diagnostic, so Stage-I initially trains in the same local neighborhood.
+  perturb_radius: 0.35
   num_directions: 2
 
   # First Stage-I experiment should perturb only the first future coarse block,
