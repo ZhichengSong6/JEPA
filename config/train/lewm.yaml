@@ -86,12 +86,14 @@ stage1:
   # action-response directions. This targets J_hat^T e_H without allowing the
   # auxiliary loss to win by collapsing action sensitivity.
   action_projected_bias_weight: 1.0
-  # Match the smallest perturbation radius used in the fixed-action H=5
-  # diagnostic, so Stage-I initially trains in the same local neighborhood.
-  perturb_radius: 0.35
+
+  # EXACT raw 10-D radius used by eval_pusht_fixed_action_response_horizon.py.
+  # Perturbations are constructed in bounded raw [-1, 1] action coordinates,
+  # then converted through the same training-set z-score normalizer.
+  perturb_radius: 0.1565
   num_directions: 2
 
-  # First Stage-I experiment should perturb only the first future coarse block,
+  # First Stage-I experiment perturbs only the first future coarse block,
   # matching the fixed-action-dimension diagnostic that isolated propagation
   # horizon from action-space dimension.
   perturb_first_only: True
