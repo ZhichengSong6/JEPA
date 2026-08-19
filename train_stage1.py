@@ -16,7 +16,7 @@ import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.loggers import WandbLogger
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
 
 from jepa import JEPA
 from module import ARPredictor, Embedder, MLP, SIGReg
@@ -91,12 +91,15 @@ def run(cfg):
     ]
 
     # Same normalization path as train.py for every loaded non-image column.
-    for col in cfg.data.dataset.keys_to_load:
-        if col.startswith("pixels"):
-            continue
-        normalizer = get_column_normalizer(dataset, col, col)
-        transforms.append(normalizer)
-        setattr(cfg.wm, f"{col}_dim", dataset.get_dim(col))
+    # OmegaConf is in struct mode here, so preserve the official train.py
+    # behavior and temporarily open cfg while adding inferred *_dim entries.
+    with open_dict(cfg):
+        for col in cfg.data.dataset.keys_to_load:
+            if col.startswith("pixels"):
+                continue
+            normalizer = get_column_normalizer(dataset, col, col)
+            transforms.append(normalizer)
+            setattr(cfg.wm, f"{col}_dim", dataset.get_dim(col))
 
     transform = spt.data.transforms.Compose(*transforms)
     dataset.transform = transform
