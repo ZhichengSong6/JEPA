@@ -29,22 +29,10 @@ from utils import (
 
 
 def _raw_action_stats(dataset):
-    """Match get_column_normalizer() statistics for the raw action column."""
+    """Match get_column_normalizer() statistics for one raw 2-D action."""
     data = torch.from_numpy(np.array(dataset.get_col_data("action")))
     data = data[~torch.isnan(data).any(dim=1)]
     return data.mean(0, keepdim=True).float(), data.std(0, keepdim=True).float()
-
-
-def _preserve_raw_action_transform():
-    """Copy raw actions before the official z-score action normalizer runs."""
-    def clone_action(x):
-        return x.clone().float()
-
-    return spt.data.transforms.WrapTorchTransform(
-        clone_action,
-        source="action",
-        target="action_raw",
-    )
 
 
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
@@ -78,21 +66,22 @@ def run(cfg):
     ##       dataset       ##
     #########################
     dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
+
+    # get_column_normalizer() operates on the raw 2-D PushT action. The HDF5
+    # dataset subsequently packs frameskip=5 normalized raw actions into one
+    # 10-D coarse action block. Stage-I later repeats these same 2-D statistics
+    # five times to invert/reapply normalization on the packed 10-D block.
     action_mean, action_std = _raw_action_stats(dataset)
 
     transforms = [
         get_img_preprocessor(
             source="pixels", target="pixels", img_size=cfg.img_size
-        ),
-        # This MUST precede get_column_normalizer(dataset, "action", "action")
-        # below. The Stage-I response probe is defined in raw env action space,
-        # exactly like the fixed-action H=5 diagnostic.
-        _preserve_raw_action_transform(),
+        )
     ]
 
-    # Same normalization path as train.py for every loaded non-image column.
-    # OmegaConf is in struct mode here, so preserve the official train.py
-    # behavior and temporarily open cfg while adding inferred *_dim entries.
+    # Same normalization path as official train.py for every loaded non-image
+    # column. OmegaConf is in struct mode, so temporarily open cfg while adding
+    # inferred *_dim entries.
     with open_dict(cfg):
         for col in cfg.data.dataset.keys_to_load:
             if col.startswith("pixels"):
