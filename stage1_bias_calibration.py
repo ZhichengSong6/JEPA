@@ -38,8 +38,6 @@ def _autoregressive_rollout(model, initial_emb, actions, history_size, horizon):
             f"need at least {history_size + horizon} states, got {initial_emb.shape[1]}."
         )
 
-    # To predict H new states from z_{history_size-1}, the final predictor
-    # window needs actions through index history_size + H - 2.
     min_action_steps = history_size + horizon - 1
     if actions.shape[1] < min_action_steps:
         raise ValueError(
@@ -66,7 +64,7 @@ def _autoregressive_rollout(model, initial_emb, actions, history_size, horizon):
 
 
 def _expand_action_stat(stat, target_dim, device, dtype):
-    """Expand raw per-action statistics to one flattened coarse action block."""
+    """Repeat raw 2-D action statistics across a packed coarse action block."""
     stat = torch.as_tensor(stat, device=device, dtype=dtype).reshape(-1)
     if stat.numel() == target_dim:
         return stat
@@ -87,15 +85,19 @@ def _normalize_raw_actions(raw_actions, action_mean, action_std):
     return (raw_actions - mean) / std.clamp_min(1e-8)
 
 
-def _bounded_delta_batch(slack, requested_radius):
-    """Torch version of the evaluator's bounded equal-norm perturbation.
+def _denormalize_actions(actions, action_mean, action_std):
+    """Invert official normalization on packed frameskip coarse actions."""
+    mean = _expand_action_stat(
+        action_mean, actions.shape[-1], actions.device, actions.dtype
+    )
+    std = _expand_action_stat(
+        action_std, actions.shape[-1], actions.device, actions.dtype
+    )
+    return actions * std + mean
 
-    For every batch element, construct a random signed vector whose component
-    magnitudes do not exceed ``slack`` and whose L2 norm is the requested raw
-    action radius whenever feasible.  If an expert block lies too close to the
-    action boundary, use its maximal feasible symmetric radius instead of
-    failing the entire training batch.
-    """
+
+def _bounded_delta_batch(slack, requested_radius):
+    """Torch version of the evaluator's bounded equal-norm perturbation."""
     slack = slack.flatten(start_dim=1).clamp_min(0.0)
     feasible = torch.linalg.vector_norm(slack, dim=-1)
     requested = torch.full_like(feasible, float(requested_radius))
@@ -120,7 +122,6 @@ def _bounded_delta_batch(slack, requested_radius):
             break
         hi = torch.where(need_more, hi * 2.0, hi)
 
-    # Monotone bisection, mirroring _bounded_delta in the diagnostic.
     for _ in range(48):
         mid = 0.5 * (lo + hi)
         below = norm_at(mid) < radius
@@ -134,7 +135,7 @@ def _bounded_delta_batch(slack, requested_radius):
 def _sample_raw_action_perturbation(
     raw_actions, history_size, horizon, radius, first_only
 ):
-    """Bounded symmetric perturbation in raw PushT action coordinates."""
+    """Bounded symmetric perturbation in packed raw PushT action coordinates."""
     active_start = history_size - 1
     active_count = 1 if first_only else horizon
     active_end = active_start + active_count
@@ -149,8 +150,9 @@ def _sample_raw_action_perturbation(
     active = torch.nan_to_num(active, nan=0.0, posinf=1.0, neginf=-1.0)
     active = active.clamp(-1.0, 1.0)
 
-    # Symmetric +/- candidates must both stay in [-1, 1], hence slack is
-    # 1 - |a| exactly as in eval_pusht_fixed_action_response_horizon.py.
+    # One coarse block is 5 raw 2-D PushT actions = 10 scalars. Flattening the
+    # active block therefore exactly matches the fixed-action evaluator's 10-D
+    # perturbation when first_only=True.
     slack = (1.0 - active.abs()).clamp_min(0.0)
     flat_delta, effective_radius = _bounded_delta_batch(slack, radius)
     delta = flat_delta.view_as(active)
@@ -165,7 +167,7 @@ def _sample_raw_action_perturbation(
 def _detached_response_directions(
     model,
     emb,
-    raw_actions,
+    normalized_actions,
     action_mean,
     action_std,
     history_size,
@@ -176,10 +178,10 @@ def _detached_response_directions(
 ):
     """Estimate terminal action-response directions from bounded raw probes.
 
-    The response direction is deliberately detached. Therefore the projected
-    bias loss cannot reduce itself by shrinking action sensitivity; it can only
-    move nominal endpoint error relative to the currently exposed local
-    action-response directions.
+    ``normalized_actions`` is the official packed LeWM tensor with last
+    dimension frameskip * action_dim (=10 for PushT). We invert the official
+    z-score normalization, perturb in bounded raw [-1,1] coordinates, then
+    apply the same normalization before calling the action encoder.
     """
     if radius <= 0:
         raise ValueError(f"stage1.perturb_radius must be > 0, got {radius}.")
@@ -197,7 +199,17 @@ def _detached_response_directions(
     try:
         with torch.no_grad():
             probe_emb = emb.detach()
-            probe_raw_actions = raw_actions.detach()
+            probe_actions = normalized_actions.detach()
+            probe_raw_actions = _denormalize_actions(
+                probe_actions, action_mean, action_std
+            )
+
+            if probe_raw_actions.shape[-1] != model.action_encoder.patch_embed.in_channels:
+                raise RuntimeError(
+                    "Stage-I coarse action dimension mismatch after de-normalization: "
+                    f"got {probe_raw_actions.shape[-1]}, action encoder expects "
+                    f"{model.action_encoder.patch_embed.in_channels}."
+                )
 
             for _ in range(int(num_directions)):
                 plus_raw, minus_raw, effective_radius = _sample_raw_action_perturbation(
@@ -243,11 +255,6 @@ def stage1_forward(self, batch, stage, cfg, action_mean, action_std):
             "Stage I is intentionally evaluated without privileged-state factor supervision. "
             "Set factor.enabled=False."
         )
-    if "action_raw" not in batch:
-        raise KeyError(
-            "Stage-I batch is missing action_raw. train_stage1.py must preserve raw "
-            "actions before the official action normalizer."
-        )
 
     ctx_len = int(cfg.wm.history_size)
     n_preds = int(cfg.wm.num_preds)
@@ -263,11 +270,18 @@ def stage1_forward(self, batch, stage, cfg, action_mean, action_std):
         raise ValueError(f"stage1.rollout_horizon must be >= 1, got {horizon}.")
 
     batch["action"] = torch.nan_to_num(batch["action"], 0.0)
-    batch["action_raw"] = torch.nan_to_num(batch["action_raw"], 0.0)
 
     output = self.model.encode(batch)
     emb = output["emb"]
     act_emb = output["act_emb"]
+
+    expected_action_dim = self.model.action_encoder.patch_embed.in_channels
+    if batch["action"].shape[-1] != expected_action_dim:
+        raise RuntimeError(
+            "Official packed action tensor has unexpected dimension: "
+            f"batch action dim={batch['action'].shape[-1]}, encoder expects "
+            f"{expected_action_dim}."
+        )
 
     if emb.shape[1] < ctx_len + horizon:
         raise ValueError(
@@ -276,25 +290,18 @@ def stage1_forward(self, batch, stage, cfg, action_mean, action_std):
             "Use data=pusht_stage1."
         )
 
-    # ------------------------------------------------------------------
     # 1) Official one-step LeWM objective on the same initial 4-state window.
-    # ------------------------------------------------------------------
     ctx_emb = emb[:, :ctx_len]
     ctx_act = act_emb[:, :ctx_len]
     tgt_emb = emb[:, n_preds : n_preds + ctx_len]
     pred_emb = self.model.predict(ctx_emb, ctx_act)
 
     output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
-    # The official dataset has history_size + 1 states. Restrict SiGReg to that
-    # same prefix so the baseline term does not silently change just because
-    # Stage I loads a longer trajectory.
     sigreg_emb = emb[:, : ctx_len + n_preds]
     output["sigreg_loss"] = self.sigreg(sigreg_emb.transpose(0, 1))
     output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"]
 
-    # ------------------------------------------------------------------
     # 2) Autoregressive rollout supervision: reduce zero-order H-step bias.
-    # ------------------------------------------------------------------
     rollout_pred = _autoregressive_rollout(
         self.model,
         emb,
@@ -307,20 +314,11 @@ def stage1_forward(self, batch, stage, cfg, action_mean, action_std):
     output["stage1_rollout_loss"] = rollout_error.pow(2).mean()
     output["stage1_endpoint_mse"] = rollout_error[:, -1].pow(2).mean().detach()
 
-    # ------------------------------------------------------------------
     # 3) Action-projected bias calibration.
-    #
-    #    e_H = zhat_H - stopgrad(z_H)
-    #    r(v) ~= Jhat_H v
-    #    L_APB = E_v[(e_H^T stopgrad(r(v)/||r(v)||))^2]
-    #
-    # This directly attacks the component responsible for Jhat_H^T e_H while
-    # keeping the response probe stop-gradient to prevent sensitivity collapse.
-    # ------------------------------------------------------------------
     response_dirs, response_norms, effective_radii = _detached_response_directions(
         self.model,
         emb,
-        batch["action_raw"],
+        batch["action"],
         action_mean=action_mean,
         action_std=action_std,
         history_size=ctx_len,
