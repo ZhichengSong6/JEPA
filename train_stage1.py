@@ -1,17 +1,17 @@
 """Train Stage-I Bias-Calibrated Action-Conditioned JEPA on full PushT.
 
-The official ``train.py`` is deliberately left untouched.  This entrypoint
+The official ``train.py`` is deliberately left untouched. This entrypoint
 reuses the same LeWM architecture, optimizer, preprocessing and checkpoint
 format, but swaps in the Stage-I forward objective and a longer offline
 sequence (``data=pusht_stage1``).
 """
 
-import os
 from functools import partial
 from pathlib import Path
 
 import hydra
 import lightning as pl
+import numpy as np
 import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
@@ -28,6 +28,25 @@ from utils import (
 )
 
 
+def _raw_action_stats(dataset):
+    """Match get_column_normalizer() statistics for the raw action column."""
+    data = torch.from_numpy(np.array(dataset.get_col_data("action")))
+    data = data[~torch.isnan(data).any(dim=1)]
+    return data.mean(0, keepdim=True).float(), data.std(0, keepdim=True).float()
+
+
+def _preserve_raw_action_transform():
+    """Copy raw actions before the official z-score action normalizer runs."""
+    def clone_action(x):
+        return x.clone().float()
+
+    return spt.data.transforms.WrapTorchTransform(
+        clone_action,
+        source="action",
+        target="action_raw",
+    )
+
+
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
 def run(cfg):
     if not cfg.stage1.enabled:
@@ -39,6 +58,11 @@ def run(cfg):
         raise ValueError(
             "Stage I intentionally excludes privileged-state factor supervision; "
             "set factor.enabled=False."
+        )
+    if "state" in cfg.data.dataset.keys_to_load:
+        raise ValueError(
+            "Stage-I data config must not load privileged simulator state. "
+            "Use data=pusht_stage1."
         )
 
     expected_steps = int(cfg.wm.history_size) + int(cfg.stage1.rollout_horizon)
@@ -54,14 +78,19 @@ def run(cfg):
     ##       dataset       ##
     #########################
     dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
+    action_mean, action_std = _raw_action_stats(dataset)
+
     transforms = [
         get_img_preprocessor(
             source="pixels", target="pixels", img_size=cfg.img_size
-        )
+        ),
+        # This MUST precede get_column_normalizer(dataset, "action", "action")
+        # below. The Stage-I response probe is defined in raw env action space,
+        # exactly like the fixed-action H=5 diagnostic.
+        _preserve_raw_action_transform(),
     ]
 
-    # Keep exactly the same non-image normalization used by train.py.
-    # Stage I does not consume raw simulator state in its loss.
+    # Same normalization path as train.py for every loaded non-image column.
     for col in cfg.data.dataset.keys_to_load:
         if col.startswith("pixels"):
             continue
@@ -154,7 +183,12 @@ def run(cfg):
     world_model = spt.Module(
         model=world_model,
         sigreg=SIGReg(**cfg.loss.sigreg.kwargs),
-        forward=partial(stage1_forward, cfg=cfg),
+        forward=partial(
+            stage1_forward,
+            cfg=cfg,
+            action_mean=action_mean,
+            action_std=action_std,
+        ),
         optim=optimizers,
     )
 
