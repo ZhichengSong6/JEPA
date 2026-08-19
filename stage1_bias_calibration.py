@@ -330,7 +330,16 @@ def stage1_forward(self, batch, stage, cfg, action_mean, action_std):
 
     endpoint_error = rollout_error[:, -1]
     projected_bias = torch.einsum("bd,bkd->bk", endpoint_error, response_dirs)
-    output["stage1_action_projected_bias_loss"] = projected_bias.pow(2).mean()
+
+    # projected_bias is a scalar projection onto a unit latent response direction,
+    # whereas rollout/endpoint losses are mean-squared errors per latent coordinate.
+    # Normalize by latent dimensionality so APB is on the same per-dimension scale
+    # and cannot dominate merely because one aligned direction can contain O(D)
+    # times the per-coordinate error energy.
+    latent_dim = endpoint_error.shape[-1]
+    raw_apb = projected_bias.pow(2).mean()
+    output["stage1_action_projected_bias_raw"] = raw_apb.detach()
+    output["stage1_action_projected_bias_loss"] = raw_apb / float(latent_dim)
     output["stage1_projected_bias_abs"] = projected_bias.abs().mean().detach()
     output["stage1_response_norm"] = response_norms.mean().detach()
     output["stage1_effective_radius"] = effective_radii.mean().detach()
@@ -349,6 +358,9 @@ def stage1_forward(self, batch, stage, cfg, action_mean, action_std):
     }
     diagnostics_dict = {
         f"{stage}/stage1_endpoint_mse": output["stage1_endpoint_mse"],
+        f"{stage}/stage1_action_projected_bias_raw": output[
+            "stage1_action_projected_bias_raw"
+        ],
         f"{stage}/stage1_projected_bias_abs": output["stage1_projected_bias_abs"],
         f"{stage}/stage1_response_norm": output["stage1_response_norm"],
         f"{stage}/stage1_effective_radius": output["stage1_effective_radius"],
