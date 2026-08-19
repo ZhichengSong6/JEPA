@@ -1,0 +1,15 @@
+# Full PushT offline sequence for Stage-I bias calibration.
+# Each dataset step is one LeWM coarse step = 5 raw PushT actions.
+dataset:
+  num_steps: ${eval:'${wm.history_size} + ${stage1.rollout_horizon}'}
+  frameskip: 5
+  name: pusht_expert_train
+  keys_to_load:
+    - pixels
+    - action
+    - proprio
+    - state
+  keys_to_cache:
+    - action
+    - proprio
+    - state
