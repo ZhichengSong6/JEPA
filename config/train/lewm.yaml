@@ -63,6 +63,37 @@ loss:
       knots: 17
       num_proj: 1024
 
+# Stage I: Bias-Calibrated Action-Conditioned JEPA.
+#
+# IMPORTANT:
+#   * enabled=False leaves the existing LeWM/Factor training forward unchanged.
+#   * enabled=True should be launched with `data=pusht_stage1`.
+#   * no simulator state, physical factor target, candidate ranking label, or
+#     planning-time verifier is used by this objective.
+#   * CEM inference and jepa.py criterion() remain raw latent MSE.
+stage1:
+  enabled: False
+
+  # H=5 matches the terminal horizon where the current CEM landscape failure
+  # is strongest. One coarse step contains 5 raw PushT actions.
+  rollout_horizon: 5
+
+  # Multi-step autoregressive target consistency reduces zero-order rollout
+  # / terminal endpoint bias.
+  rollout_weight: 1.0
+
+  # Penalize the component of endpoint bias along detached local
+  # action-response directions. This targets J_hat^T e_H without allowing the
+  # auxiliary loss to win by collapsing action sensitivity.
+  action_projected_bias_weight: 1.0
+  perturb_radius: 0.10
+  num_directions: 2
+
+  # First Stage-I experiment should perturb only the first future coarse block,
+  # matching the fixed-action-dimension diagnostic that isolated propagation
+  # horizon from action-space dimension.
+  perturb_first_only: True
+
 
 # Optional full-PushT physical factor supervision.
 # disabled => exact original LeWM objective / architecture.
