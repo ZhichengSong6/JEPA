@@ -32,8 +32,12 @@ optimizer:
   lr: 5e-5
   weight_decay: 1e-3
 
+# Keep W&B disabled by default on the Stage-I research branch. In particular,
+# stable_pretraining's Manager currently cannot resume an offline WandbLogger
+# run reliably (previous_run can be None). Enable explicitly for online runs
+# with `wandb.enabled=true` when desired.
 wandb:
-  enabled: True
+  enabled: False
   config:
     entity: lewm
     project: lewm
