@@ -16,7 +16,7 @@ Stage II therefore optimizes two planner-facing quantities directly:
 2) preservation of the pretrained LeWM action-response Gram geometry.
 
 No simulator state, counterfactual ground-truth rollout, physical factor, or
-planning-time oracle is used.  The +/- actions are synthetic predictor probes;
+planning-time oracle is used. The +/- actions are synthetic predictor probes;
 the only target is the observed offline future image embedding.
 """
 
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import torch
 
+from distributed_training import global_batch_sigreg
 from stage1_bias_calibration import (
     _autoregressive_rollout,
     _denormalize_actions,
@@ -33,11 +34,11 @@ from stage1_bias_calibration import (
 
 
 def _relative_gram_loss(student_response, teacher_response, eps: float):
-    """Relative sampled-Gram error, preserving both shape and response scale.
+    """Relative sampled-Gram error, preserving shape and response scale.
 
-    response tensors are [B, K, D].  Dividing inner products by D only keeps
-    the numerical scale independent of latent width; it cancels in the
-    relative loss.
+    Response tensors are [B, K, D]. Dividing inner products by D only keeps the
+    numerical scale independent of latent width; it cancels in the relative
+    loss.
     """
     latent_dim = float(student_response.shape[-1])
     gs = torch.einsum("bkd,bjd->bkj", student_response, student_response) / latent_dim
@@ -47,6 +48,15 @@ def _relative_gram_loss(student_response, teacher_response, eps: float):
     num = (gs - gt).pow(2).sum(dim=(-2, -1))
     den = gt.pow(2).sum(dim=(-2, -1)).clamp_min(float(eps))
     return (num / den).mean(), gs, gt
+
+
+def _repeat_for_candidates(x: torch.Tensor, count: int) -> torch.Tensor:
+    """Repeat a batch tensor along a candidate axis, then flatten B*candidate."""
+    if count < 1:
+        raise ValueError(f"candidate count must be positive, got {count}")
+    b = x.shape[0]
+    expanded = x[:, None].expand(b, count, *x.shape[1:])
+    return expanded.reshape(b * count, *x.shape[1:])
 
 
 def _stage2_probe_losses(
@@ -63,14 +73,18 @@ def _stage2_probe_losses(
     radius,
     first_only,
     num_directions,
+    directions_per_chunk,
     odd_eps,
     gram_eps,
 ):
-    """Compute differentiable student odd loss and teacher-Gram preservation.
+    """Compute differentiable odd loss and teacher-Gram preservation.
 
-    The SAME bounded raw-action +/- probes are sent through student and frozen
-    teacher.  Student probe rollouts retain gradients; teacher rollouts run
-    under no_grad().
+    All K bounded raw-action perturbations are sampled first. Probe directions
+    are then processed in vectorized chunks: for C directions, + and - probes
+    are concatenated into a single 2*C candidate axis and rolled out in one
+    student call and one frozen-teacher call. This preserves the exact Stage-II
+    objective while reducing Python/model-call overhead and keeping peak memory
+    bounded.
     """
     if radius <= 0:
         raise ValueError(f"stage2.perturb_radius must be > 0, got {radius}.")
@@ -79,21 +93,21 @@ def _stage2_probe_losses(
             "stage2.num_directions must be >= 2 so sampled curvature has "
             f"cross-direction structure, got {num_directions}."
         )
+    if directions_per_chunk < 1:
+        raise ValueError(
+            "stage2.probe_directions_per_chunk must be >=1, got "
+            f"{directions_per_chunk}."
+        )
 
     raw_actions = _denormalize_actions(
         normalized_actions.detach(), action_mean, action_std
     )
 
-    student_responses = []
-    teacher_responses = []
-    odd_increments = []
-    teacher_quadratic = []
-    effective_radii = []
-
-    # The parent Lightning module may recursively put teacher into train mode.
-    # Reassert eval semantics here; parameters are also requires_grad=False.
-    teacher.eval()
-
+    # Sample all directions before model forward passes. Shape after stacking:
+    # [B,K,T,A] for actions and [B,K] for exact effective radii.
+    plus_actions = []
+    minus_actions = []
+    radii = []
     for _ in range(int(num_directions)):
         plus_raw, minus_raw, effective_radius = _sample_raw_action_perturbation(
             raw_actions,
@@ -102,41 +116,84 @@ def _stage2_probe_losses(
             radius=radius,
             first_only=first_only,
         )
-        plus = _normalize_raw_actions(plus_raw, action_mean, action_std)
-        minus = _normalize_raw_actions(minus_raw, action_mean, action_std)
+        plus_actions.append(
+            _normalize_raw_actions(plus_raw, action_mean, action_std)
+        )
+        minus_actions.append(
+            _normalize_raw_actions(minus_raw, action_mean, action_std)
+        )
+        radii.append(effective_radius)
 
-        # Student: gradients flow through both perturbed rollouts.  This is the
-        # key difference from Stage-I's detached response-direction probe.
-        student_plus = _autoregressive_rollout(
-            student, student_emb, plus, history_size, horizon
-        )[:, -1]
-        student_minus = _autoregressive_rollout(
-            student, student_emb, minus, history_size, horizon
-        )[:, -1]
+    plus_actions = torch.stack(plus_actions, dim=1)
+    minus_actions = torch.stack(minus_actions, dim=1)
+    effective_radius = torch.stack(radii, dim=1)
 
-        denom = (2.0 * effective_radius).clamp_min(1e-8)[:, None]
+    student_responses = []
+    teacher_responses = []
+    odd_increments = []
+    teacher_quadratic = []
+
+    teacher.eval()
+    batch_size = student_emb.shape[0]
+    latent_dim = student_goal.shape[-1]
+
+    for start in range(0, int(num_directions), int(directions_per_chunk)):
+        stop = min(start + int(directions_per_chunk), int(num_directions))
+        c = stop - start
+
+        # Candidate order is [all plus directions, all minus directions].
+        action_chunk = torch.cat(
+            [plus_actions[:, start:stop], minus_actions[:, start:stop]], dim=1
+        )
+        candidate_count = 2 * c
+        flat_actions = action_chunk.reshape(
+            batch_size * candidate_count,
+            *action_chunk.shape[2:],
+        )
+
+        flat_student_emb = _repeat_for_candidates(student_emb, candidate_count)
+        student_endpoint = _autoregressive_rollout(
+            student,
+            flat_student_emb,
+            flat_actions,
+            history_size,
+            horizon,
+        )[:, -1]
+        student_endpoint = student_endpoint.reshape(
+            batch_size, candidate_count, latent_dim
+        )
+        student_plus = student_endpoint[:, :c]
+        student_minus = student_endpoint[:, c:]
+
+        radius_chunk = effective_radius[:, start:stop]
+        denom = (2.0 * radius_chunk).clamp_min(1e-8)[..., None]
         student_response = (student_plus - student_minus) / denom
 
-        # Planner-facing latent costs use per-coordinate MSE here so the loss
-        # scale is independent of latent width.  Their odd part is exactly zero
-        # for a locally symmetric endpoint-target landscape.
-        c_plus = (student_plus - student_goal).pow(2).mean(dim=-1)
-        c_minus = (student_minus - student_goal).pow(2).mean(dim=-1)
+        goal = student_goal[:, None, :]
+        c_plus = (student_plus - goal).pow(2).mean(dim=-1)
+        c_minus = (student_minus - goal).pow(2).mean(dim=-1)
         odd = 0.5 * (c_plus - c_minus)
 
         with torch.no_grad():
-            teacher_plus = _autoregressive_rollout(
-                teacher, teacher_emb, plus, history_size, horizon
+            flat_teacher_emb = _repeat_for_candidates(teacher_emb, candidate_count)
+            teacher_endpoint = _autoregressive_rollout(
+                teacher,
+                flat_teacher_emb,
+                flat_actions,
+                history_size,
+                horizon,
             )[:, -1]
-            teacher_minus = _autoregressive_rollout(
-                teacher, teacher_emb, minus, history_size, horizon
-            )[:, -1]
+            teacher_endpoint = teacher_endpoint.reshape(
+                batch_size, candidate_count, latent_dim
+            )
+            teacher_plus = teacher_endpoint[:, :c]
+            teacher_minus = teacher_endpoint[:, c:]
             teacher_response = (teacher_plus - teacher_minus) / denom
 
-            # At this fixed perturbation radius, r^2 ||Jv||^2 / D is the
-            # teacher's local quadratic goal-cost scale along this probe.
+            # r^2 ||Jv||^2 / D: frozen teacher quadratic cost scale at the
+            # actual perturbation radius along each sampled direction.
             teacher_q = (
-                effective_radius.pow(2)
+                radius_chunk.pow(2)
                 * teacher_response.pow(2).mean(dim=-1)
             )
 
@@ -144,17 +201,21 @@ def _stage2_probe_losses(
         teacher_responses.append(teacher_response)
         odd_increments.append(odd)
         teacher_quadratic.append(teacher_q)
-        effective_radii.append(effective_radius)
 
-    student_response = torch.stack(student_responses, dim=1)   # [B,K,D]
-    teacher_response = torch.stack(teacher_responses, dim=1)   # [B,K,D]
-    odd = torch.stack(odd_increments, dim=1)                   # [B,K]
-    teacher_q = torch.stack(teacher_quadratic, dim=1)          # [B,K]
-    effective_radius = torch.stack(effective_radii, dim=1)     # [B,K]
+    student_response = torch.cat(student_responses, dim=1)
+    teacher_response = torch.cat(teacher_responses, dim=1)
+    odd = torch.cat(odd_increments, dim=1)
+    teacher_q = torch.cat(teacher_quadratic, dim=1)
 
-    # Dimensionless per-sample odd energy normalized by the FROZEN teacher's
-    # useful local curvature energy.  The denominator is detached by
-    # construction, so the student cannot lower L_odd by collapsing curvature.
+    if student_response.shape[1] != int(num_directions):
+        raise RuntimeError(
+            "Vectorized Stage-II probe bookkeeping error: "
+            f"expected K={num_directions}, got {student_response.shape[1]}."
+        )
+
+    # Dimensionless odd energy normalized by the FROZEN teacher's useful local
+    # curvature energy. The denominator is detached, so the student cannot
+    # lower L_odd by collapsing its own response magnitude.
     odd_energy = odd.pow(2).mean(dim=1)
     teacher_curv_energy = teacher_q.pow(2).mean(dim=1).detach()
     odd_loss = (odd_energy / teacher_curv_energy.clamp_min(float(odd_eps))).mean()
@@ -220,7 +281,7 @@ def stage2_forward(self, batch, stage, cfg, action_mean, action_std):
     batch["action"] = torch.nan_to_num(batch["action"], 0.0)
 
     # ------------------------------------------------------------------
-    # Student encoding and the unchanged official one-step LeWM objective.
+    # Student encoding and unchanged official one-step LeWM prediction loss.
     # ------------------------------------------------------------------
     output = student.encode(batch)
     emb = output["emb"]
@@ -246,12 +307,15 @@ def stage2_forward(self, batch, stage, cfg, action_mean, action_std):
 
     output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
     sigreg_emb = emb[:, : ctx_len + n_preds]
-    output["sigreg_loss"] = self.sigreg(sigreg_emb.transpose(0, 1))
+    output["sigreg_loss"] = global_batch_sigreg(
+        self.sigreg,
+        sigreg_emb.transpose(0, 1),
+        enabled=bool(cfg.loss.sigreg.get("global_batch_ddp", False)),
+    )
     output["loss"] = output["pred_loss"] + sigreg_weight * output["sigreg_loss"]
 
     # ------------------------------------------------------------------
-    # H-step autoregressive supervision.  Same Stage-I rollout term, but the
-    # student starts from the official pretrained LeWM checkpoint.
+    # H-step autoregressive supervision.
     # ------------------------------------------------------------------
     rollout_pred = _autoregressive_rollout(
         student,
@@ -266,16 +330,9 @@ def stage2_forward(self, batch, stage, cfg, action_mean, action_std):
     output["stage2_rollout_loss"] = rollout_loss
     output["stage2_endpoint_mse"] = rollout_error[:, -1].pow(2).mean().detach()
 
-    # The observed H-step future endpoint is the LOCAL GOAL for the symmetry
-    # objective.  This does NOT assert that arbitrary task goals are symmetric;
-    # it only says that around an action sequence observed to reach this future
-    # endpoint, the local goal cost should not contain a model-bias-induced odd
-    # tilt.
+    # The observed H-step future endpoint is the LOCAL GOAL for symmetry.
     student_goal = emb[:, ctx_len + horizon - 1].detach()
 
-    # Frozen teacher uses its own latent coordinates.  Gram supervision is
-    # invariant to a common orthogonal change of latent basis and does not force
-    # exact student/teacher response-vector equality.
     teacher.eval()
     with torch.no_grad():
         teacher_output = teacher.encode(batch)
@@ -295,6 +352,7 @@ def stage2_forward(self, batch, stage, cfg, action_mean, action_std):
         radius=float(cfg.stage2.perturb_radius),
         first_only=bool(cfg.stage2.perturb_first_only),
         num_directions=int(cfg.stage2.num_directions),
+        directions_per_chunk=int(cfg.stage2.probe_directions_per_chunk),
         odd_eps=float(cfg.stage2.odd_normalization_eps),
         gram_eps=float(cfg.stage2.gram_normalization_eps),
     )
