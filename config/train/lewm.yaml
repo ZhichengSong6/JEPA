@@ -32,10 +32,7 @@ optimizer:
   lr: 5e-5
   weight_decay: 1e-3
 
-# Keep W&B disabled by default on the Stage-I research branch. In particular,
-# stable_pretraining's Manager currently cannot resume an offline WandbLogger
-# run reliably (previous_run can be None). Enable explicitly for online runs
-# with `wandb.enabled=true` when desired.
+# Keep W&B disabled by default on the research branch.
 wandb:
   enabled: False
   config:
@@ -77,31 +74,51 @@ loss:
 #   * CEM inference and jepa.py criterion() remain raw latent MSE.
 stage1:
   enabled: False
-
-  # H=5 matches the terminal horizon where the current CEM landscape failure
-  # is strongest. One coarse step contains 5 raw PushT actions.
   rollout_horizon: 5
-
-  # Multi-step autoregressive target consistency reduces zero-order rollout
-  # / terminal endpoint bias.
   rollout_weight: 1.0
-
-  # Penalize the component of endpoint bias along detached local
-  # action-response directions. This targets J_hat^T e_H without allowing the
-  # auxiliary loss to win by collapsing action sensitivity.
   action_projected_bias_weight: 1.0
-
-  # EXACT raw 10-D radius used by eval_pusht_fixed_action_response_horizon.py.
-  # Perturbations are constructed in bounded raw [-1, 1] action coordinates,
-  # then converted through the same training-set z-score normalizer.
   perturb_radius: 0.1565
   num_directions: 2
-
-  # First Stage-I experiment perturbs only the first future coarse block,
-  # matching the fixed-action-dimension diagnostic that isolated propagation
-  # horizon from action-space dimension.
   perturb_first_only: True
 
+# Stage II: Goal-relative landscape-faithful fine-tuning.
+#
+# The first controlled Stage-II experiment starts from official LeWM epoch 10,
+# uses the same checkpoint as a frozen curvature teacher, and replaces Stage-I
+# APB with two direct planner-facing terms:
+#   (1) suppress predicted +/- goal-cost odd asymmetry around an observed
+#       future endpoint target;
+#   (2) preserve the teacher's sampled action-response Gram matrix, including
+#       its absolute response scale.
+#
+# Training uses only offline observations/actions. No simulator state or
+# counterfactual ground-truth rollout is loaded.
+stage2:
+  enabled: False
+
+  init_policy: lewm_epoch_10
+  teacher_policy: lewm_epoch_10
+
+  rollout_horizon: 5
+  rollout_weight: 1.0
+
+  odd_weight: 1.0
+  curvature_weight: 1.0
+
+  # Same exact first-coarse-block raw-action perturbation scale used throughout
+  # the fixed-action diagnostics.
+  perturb_radius: 0.1565
+  perturb_first_only: True
+
+  # K=4 is the first formal setting: enough to constrain cross-direction Gram
+  # structure while remaining far cheaper than the 64-direction evaluator.
+  num_directions: 4
+
+  # L_odd is normalized by frozen-teacher quadratic-energy squared; L_curv is
+  # normalized by frozen-teacher Gram Frobenius energy. These floors only avoid
+  # division by numerically near-zero local response energy.
+  odd_normalization_eps: 1.0e-6
+  gram_normalization_eps: 1.0e-8
 
 # Optional full-PushT physical factor supervision.
 # disabled => exact original LeWM objective / architecture.
