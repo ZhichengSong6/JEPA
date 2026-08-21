@@ -1,0 +1,14 @@
+# Full PushT offline sequence for Stage-II landscape-faithful fine-tuning.
+# Each dataset step is one LeWM coarse step = 5 raw PushT actions.
+# Stage II intentionally does NOT load simulator state.
+dataset:
+  num_steps: ${eval:'${wm.history_size} + ${stage2.rollout_horizon}'}
+  frameskip: 5
+  name: pusht_expert_train
+  keys_to_load:
+    - pixels
+    - action
+    - proprio
+  keys_to_cache:
+    - action
+    - proprio
