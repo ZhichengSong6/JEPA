@@ -2,7 +2,7 @@
 
 This control uses the SAME long offline sequence config and batch size as Stage
 II Experiment A, but computes only the original one-step LeWM + SiGReg loss on
-the initial official context window.  It therefore controls for another 10
+the initial official context window. It therefore controls for another 10
 training epochs / batches without adding rollout, odd-symmetry, or curvature
 losses.
 """
@@ -20,6 +20,7 @@ from omegaconf import OmegaConf, open_dict
 
 import jepa  # noqa: F401
 import module  # noqa: F401
+from distributed_training import global_batch_sigreg
 from module import SIGReg
 from utils import ModelObjectCallBack, get_column_normalizer, get_img_preprocessor
 
@@ -65,7 +66,11 @@ def lewm_continuation_forward(self, batch, stage, cfg):
 
     output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
     sigreg_emb = emb[:, : ctx_len + n_preds]
-    output["sigreg_loss"] = self.sigreg(sigreg_emb.transpose(0, 1))
+    output["sigreg_loss"] = global_batch_sigreg(
+        self.sigreg,
+        sigreg_emb.transpose(0, 1),
+        enabled=bool(cfg.loss.sigreg.get("global_batch_ddp", False)),
+    )
     output["loss"] = output["pred_loss"] + sigreg_weight * output["sigreg_loss"]
 
     losses_dict = {
