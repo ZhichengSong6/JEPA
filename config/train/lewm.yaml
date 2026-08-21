@@ -32,7 +32,6 @@ optimizer:
   lr: 5e-5
   weight_decay: 1e-3
 
-# Keep W&B disabled by default on the research branch.
 wandb:
   enabled: False
   config:
@@ -65,13 +64,6 @@ loss:
       num_proj: 1024
 
 # Stage I: Bias-Calibrated Action-Conditioned JEPA.
-#
-# IMPORTANT:
-#   * enabled=False leaves the existing LeWM/Factor training forward unchanged.
-#   * enabled=True should be launched with `data=pusht_stage1`.
-#   * no simulator state, physical factor target, candidate ranking label, or
-#     planning-time verifier is used by this objective.
-#   * CEM inference and jepa.py criterion() remain raw latent MSE.
 stage1:
   enabled: False
   rollout_horizon: 5
@@ -81,21 +73,12 @@ stage1:
   num_directions: 2
   perturb_first_only: True
 
-# Stage II: Goal-relative landscape-faithful fine-tuning.
-#
-# The first controlled Stage-II experiment starts from official LeWM epoch 10,
-# uses the same checkpoint as a frozen curvature teacher, and replaces Stage-I
-# APB with two direct planner-facing terms:
-#   (1) suppress predicted +/- goal-cost odd asymmetry around an observed
-#       future endpoint target;
-#   (2) preserve the teacher's sampled action-response Gram matrix, including
-#       its absolute response scale.
-#
-# Training uses only offline observations/actions. No simulator state or
-# counterfactual ground-truth rollout is loaded.
+# Stage II: goal-relative landscape-faithful training.
+# init_mode=pretrained is Experiment A; init_mode=random is Experiment C.
+# Both use the official LeWM epoch-10 checkpoint as a frozen curvature teacher.
 stage2:
   enabled: False
-
+  init_mode: pretrained
   init_policy: lewm_epoch_10
   teacher_policy: lewm_epoch_10
 
@@ -105,42 +88,34 @@ stage2:
   odd_weight: 1.0
   curvature_weight: 1.0
 
-  # Same exact first-coarse-block raw-action perturbation scale used throughout
-  # the fixed-action diagnostics.
   perturb_radius: 0.1565
   perturb_first_only: True
-
-  # K=4 is the first formal setting: enough to constrain cross-direction Gram
-  # structure while remaining far cheaper than the 64-direction evaluator.
   num_directions: 4
 
-  # L_odd is normalized by frozen-teacher quadratic-energy squared; L_curv is
-  # normalized by frozen-teacher Gram Frobenius energy. These floors only avoid
-  # division by numerically near-zero local response energy.
   odd_normalization_eps: 1.0e-6
   gram_normalization_eps: 1.0e-8
 
+# Experiment B: ordinary LeWM continuation control. It starts from the same
+# official epoch-10 model and trains for the same additional epochs/batches as
+# Experiment A, but uses only the original one-step LeWM + SiGReg objective.
+continuation:
+  enabled: False
+  init_policy: lewm_epoch_10
+
 # Optional full-PushT physical factor supervision.
-# disabled => exact original LeWM objective / architecture.
-# enabled  => training-only heads for pusher XY, block XY, and block rotation.
-# CEM never reads these heads; jepa.py criterion() remains raw-latent MSE.
 factor:
   enabled: False
   world_size: 512.0
   head_hidden_dim: 256
   head_depth: 2
 
-  # Same outer auxiliary weights used in the simplified factor experiment.
   encoded_weight: 0.10
   predicted_weight: 0.05
   metric_weight: 0.05
 
-  # The three 2-D factors are ALWAYS averaged equally (1/3 each) in train.py.
   theta_norm_weight: 0.05
   metric_smooth_l1_beta: 0.05
 
-  # Fixed normalization statistics derived once from the raw training states.
-  # These are data statistics, not tuned planning/model hyperparameters.
   metric_scale_quantile: 0.95
   metric_scale_num_pairs: 200000
   metric_scales:
