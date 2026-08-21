@@ -99,7 +99,7 @@ $COMMON_SETUP
 
 srun --kill-on-bad-exit=1 python -u train_stage2.py \
   data=pusht_stage2 \
-  \$COMMON_HYDRA \
+  $COMMON_HYDRA \
   stage2.enabled=true \
   stage2.init_mode=pretrained \
   stage2.init_policy=lewm_epoch_10 \
@@ -123,7 +123,7 @@ $COMMON_SETUP
 
 srun --kill-on-bad-exit=1 python -u train_stage2.py \
   data=pusht_stage2 \
-  \$COMMON_HYDRA \
+  $COMMON_HYDRA \
   stage2.enabled=true \
   stage2.init_mode=pretrained \
   stage2.init_policy=lewm_epoch_10 \
@@ -146,7 +146,7 @@ $COMMON_SETUP
 
 srun --kill-on-bad-exit=1 python -u train_lewm_continuation.py \
   data=pusht_stage2 \
-  \$COMMON_HYDRA \
+  $COMMON_HYDRA \
   continuation.enabled=true \
   continuation.init_policy=lewm_epoch_10 \
   stage1.enabled=false \
@@ -168,7 +168,7 @@ $COMMON_SETUP
 
 srun --kill-on-bad-exit=1 python -u train_stage2.py \
   data=pusht_stage2 \
-  \$COMMON_HYDRA \
+  $COMMON_HYDRA \
   stage2.enabled=true \
   stage2.init_mode=random \
   stage2.teacher_policy=lewm_epoch_10 \
