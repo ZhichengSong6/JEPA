@@ -16,7 +16,10 @@ dump_object: True
 trainer:
   max_epochs: 100
   devices: auto
+  num_nodes: 1
   accelerator: gpu
+  strategy: auto
+  sync_batchnorm: False
   precision: bf16
   gradient_clip_val: 1.0
 
@@ -59,6 +62,10 @@ predictor:
 loss:
   sigreg:
     weight: 0.09
+    # False preserves the original single-GPU implementation. Formal 4-GPU
+    # A/B/C runs set this True so SIGReg sees the same global batch=64 rather
+    # than four independent local batches of 16.
+    global_batch_ddp: False
     kwargs:
       knots: 17
       num_proj: 1024
@@ -91,6 +98,12 @@ stage2:
   perturb_radius: 0.1565
   perturb_first_only: True
   num_directions: 4
+
+  # Process two perturbation directions at once. With formal 4-GPU training,
+  # local batch=16, so a chunk contains 2 signs * 2 directions * 16 = 64
+  # predictor candidates: similar peak candidate batch to the successful
+  # single-GPU smoke, while cutting probe-rollout calls by ~4x.
+  probe_directions_per_chunk: 2
 
   odd_normalization_eps: 1.0e-6
   gram_normalization_eps: 1.0e-8
