@@ -1,7 +1,11 @@
 """Train Stage-II landscape-faithful JEPA on full PushT.
 
-Stage II fine-tunes a student initialized from the official pretrained LeWM and
-uses a second frozen copy of that same LeWM as a curvature teacher.
+Stage II supports two controlled student initializations:
+
+* ``pretrained``: initialize the student from official LeWM epoch 10 and use a
+  frozen copy of that checkpoint as the curvature teacher;
+* ``random``: initialize the same architecture from scratch while keeping the
+  official LeWM checkpoint frozen as the curvature teacher.
 
 The official train.py and Stage-I entrypoint are left untouched.
 """
@@ -18,10 +22,8 @@ import torch
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
-# Import local model/module definitions before loading pickled model objects.
-import jepa  # noqa: F401
-import module  # noqa: F401
-from module import SIGReg
+from jepa import JEPA
+from module import ARPredictor, Embedder, MLP, SIGReg
 from stage2_landscape_faithful import stage2_forward
 from utils import ModelObjectCallBack, get_column_normalizer, get_img_preprocessor
 
@@ -34,7 +36,7 @@ def _raw_action_stats(dataset):
 
 
 def _load_policy_model(policy_name: str):
-    """Load a saved LeWM model object using the same path resolver as eval.py."""
+    """Load a saved LeWM model object using the same resolver as evaluation."""
     model = swm.policy.AutoCostModel(str(policy_name))
     if not isinstance(model, torch.nn.Module):
         raise TypeError(
@@ -43,8 +45,55 @@ def _load_policy_model(policy_name: str):
     return model
 
 
+def _build_random_student(cfg):
+    """Build exactly the official LeWM architecture with random parameters."""
+    encoder = spt.backbone.utils.vit_hf(
+        cfg.encoder_scale,
+        patch_size=cfg.patch_size,
+        image_size=cfg.img_size,
+        pretrained=False,
+        use_mask_token=False,
+    )
+    hidden_dim = encoder.config.hidden_size
+    embed_dim = cfg.wm.get("embed_dim", hidden_dim)
+    effective_act_dim = cfg.data.dataset.frameskip * cfg.wm.action_dim
+
+    predictor = ARPredictor(
+        num_frames=cfg.wm.history_size,
+        input_dim=embed_dim,
+        hidden_dim=hidden_dim,
+        output_dim=hidden_dim,
+        **cfg.predictor,
+    )
+    action_encoder = Embedder(input_dim=effective_act_dim, emb_dim=embed_dim)
+    projector = MLP(
+        input_dim=hidden_dim,
+        output_dim=embed_dim,
+        hidden_dim=2048,
+        norm_fn=torch.nn.BatchNorm1d,
+    )
+    predictor_proj = MLP(
+        input_dim=hidden_dim,
+        output_dim=embed_dim,
+        hidden_dim=2048,
+        norm_fn=torch.nn.BatchNorm1d,
+    )
+    return JEPA(
+        encoder=encoder,
+        predictor=predictor,
+        action_encoder=action_encoder,
+        projector=projector,
+        pred_proj=predictor_proj,
+        factor_heads=None,
+    )
+
+
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
 def run(cfg):
+    # Seed before model construction so Experiment C's random initialization is
+    # reproducible. Manager receives the same seed below and re-seeds workers.
+    pl.seed_everything(int(cfg.seed), workers=True)
+
     if not cfg.stage2.enabled:
         raise ValueError(
             "train_stage2.py requires stage2.enabled=True. "
@@ -75,11 +124,10 @@ def run(cfg):
             "Launch with data=pusht_stage2."
         )
 
-    if str(cfg.stage2.init_policy) != str(cfg.stage2.teacher_policy):
-        print(
-            "WARNING: init_policy and teacher_policy differ. This is supported, "
-            "but the first controlled experiment is intended to use the same "
-            "official LeWM checkpoint for both."
+    init_mode = str(cfg.stage2.init_mode).lower()
+    if init_mode not in {"pretrained", "random"}:
+        raise ValueError(
+            f"stage2.init_mode must be 'pretrained' or 'random', got {init_mode!r}."
         )
 
     #########################
@@ -105,7 +153,7 @@ def run(cfg):
     transform = spt.data.transforms.Compose(*transforms)
     dataset.transform = transform
 
-    rnd_gen = torch.Generator().manual_seed(cfg.seed)
+    rnd_gen = torch.Generator().manual_seed(int(cfg.seed))
     train_set, val_set = spt.data.random_split(
         dataset,
         lengths=[cfg.train_split, 1 - cfg.train_split],
@@ -129,8 +177,12 @@ def run(cfg):
     ##############################
     ##       model / optim      ##
     ##############################
-    print(f"Loading Stage-II student init: {cfg.stage2.init_policy}")
-    student = _load_policy_model(cfg.stage2.init_policy)
+    if init_mode == "pretrained":
+        print(f"Loading Stage-II student init: {cfg.stage2.init_policy}")
+        student = _load_policy_model(cfg.stage2.init_policy)
+    else:
+        print("Building Stage-II student from random initialization")
+        student = _build_random_student(cfg)
     student.train()
     student.requires_grad_(True)
 
@@ -169,9 +221,8 @@ def run(cfg):
         optim=optimizers,
     )
 
-    # Registering teacher as a child module lets Lightning move it to the same
-    # device automatically. The optimizer explicitly targets only `model`, and
-    # teacher parameters have requires_grad=False.
+    # Teacher is registered only for device movement/checkpoint visibility. It
+    # is frozen and the optimizer pattern explicitly targets only `model`.
     training_module.teacher_model = teacher
 
     ##########################
@@ -208,6 +259,7 @@ def run(cfg):
         module=training_module,
         data=data_module,
         ckpt_path=run_dir / f"{cfg.output_model_name}_weights.ckpt",
+        seed=int(cfg.seed),
     )
     manager()
 
