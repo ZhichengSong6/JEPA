@@ -46,6 +46,26 @@ def _repeat_for_candidates(x: torch.Tensor, count: int) -> torch.Tensor:
     return expanded.reshape(b * count, *x.shape[1:])
 
 
+def _eval_encode_embedding(model, batch):
+    """Encode the same observed batch in evaluator-consistent eval mode.
+
+    This is used only to define the local synthetic JVP probe base point.  It
+    prevents an artificial student/teacher mismatch caused solely by the
+    student's training-mode projector BatchNorm.  No gradients are propagated
+    through this extra probe encoding.
+    """
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            probe_batch = {
+                k: v for k, v in batch.items() if torch.is_tensor(v)
+            }
+            return model.encode(probe_batch)["emb"].detach()
+    finally:
+        model.train(was_training)
+
+
 def _sample_probe_actions(
     normalized_actions,
     action_mean,
@@ -117,10 +137,10 @@ def _student_teacher_jvps(
     batches.  Gradients are still enabled for the student probe path, so JVP
     matching directly trains the predictor/action-conditioned mapping.
 
-    Initial student embeddings are detached for this probe path.  The base
-    one-step and demonstrated rollout losses remain responsible for learning
-    the encoder representation; JVP preservation acts directly on the local
-    action-conditioned predictor response.
+    ``student_emb`` and ``teacher_emb`` are both evaluator-consistent eval-mode
+    observed embeddings.  They are detached: the base one-step and demonstrated
+    rollout losses remain responsible for learning the encoder representation;
+    JVP preservation acts directly on the local predictor/action response.
     """
     if directions_per_chunk < 1:
         raise ValueError(
@@ -306,17 +326,22 @@ def stage2_v2_forward(self, batch, stage, cfg, action_mean, action_std):
     output["stage2_v2_endpoint_mse"] = endpoint_error.pow(2).mean().detach()
 
     # ------------------------------------------------------------------
-    # 3) Paired synthetic local responses from student and frozen teacher.
+    # 3) Evaluator-consistent local response base points.  Student and teacher
+    #    are the same LeWM10 at initialization, so this makes initial JVP loss
+    #    approximately zero rather than measuring train/eval BatchNorm mismatch.
     # ------------------------------------------------------------------
+    student_probe_emb = _eval_encode_embedding(student, batch)
     teacher.eval()
     with torch.no_grad():
-        teacher_output = teacher.encode(batch)
-        teacher_emb = teacher_output["emb"].detach()
+        teacher_probe_batch = {
+            k: v for k, v in batch.items() if torch.is_tensor(v)
+        }
+        teacher_emb = teacher.encode(teacher_probe_batch)["emb"].detach()
 
     student_response, teacher_response, effective_radius = _student_teacher_jvps(
         student=student,
         teacher=teacher,
-        student_emb=emb,
+        student_emb=student_probe_emb,
         teacher_emb=teacher_emb,
         normalized_actions=batch["action"],
         action_mean=action_mean,
