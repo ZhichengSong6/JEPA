@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Submit Anchored Local Dynamics (ALD) calibration on all four GPUs of 4090node2.
+# Submit Anchored Local Dynamics (ALD) calibration on all four GPUs of a chosen 4090 node.
 #
 # Usage:
 #   bash scripts/submit_ald.sh smoke
 #   bash scripts/submit_ald.sh formal
+#   NODE=4090node3 bash scripts/submit_ald.sh formal
+#
+# NODE defaults to 4090node2 for backward compatibility, but can be overridden
+# from the shell without editing the script.
 #
 # The smoke run is two optimization steps on the exact same 4-GPU DDP path.
 # Its initial validation should satisfy the ALD construction invariants:
@@ -23,7 +27,7 @@ fi
 REPO="/mnt/slurmfs-3090node3/user_data/zsong469/LeWM_official"
 STABLEWM_HOME="/mnt/slurmfs-3090node3/user_data/zsong469/LeWM_data"
 CONDA_SH="/mnt/slurmfs-4090node1/homes/zsong469/miniforge3/etc/profile.d/conda.sh"
-NODE="4090node2"
+NODE="${NODE:-4090node2}"
 WORLD_SIZE=4
 LOCAL_BATCH=16
 GLOBAL_BATCH=$((WORLD_SIZE * LOCAL_BATCH))
@@ -133,7 +137,7 @@ echo
 if [[ "$MODE" == "smoke" ]]; then
   echo "Log: tail -f $LOG_DIR/ald_smoke_${JID}.out"
   echo "After the smoke completes cleanly, submit:"
-  echo "  bash scripts/submit_ald.sh formal"
+  echo "  NODE=$NODE bash scripts/submit_ald.sh formal"
 else
   echo "Log: tail -f $LOG_DIR/ald_formal_${JID}.out"
   echo "Final model:"
