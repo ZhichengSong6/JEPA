@@ -93,6 +93,7 @@ class OrderAwareCEMSolver:
         self.eps = float(eps)
         self.verbose = bool(verbose)
 
+        # Counts environment-level planning problems, not outer batched calls.
         self._solve_count = 0
         self._stopped_count = 0
         self._stop_steps: list[int] = []
@@ -251,9 +252,6 @@ class OrderAwareCEMSolver:
         self, info_dict: dict, init_action: torch.Tensor | None = None
     ) -> dict:
         start_time = time.time()
-        self._solve_count += 1
-        solve_id = self._solve_count
-
         outputs = {"costs": [], "mean": [], "var": []}
 
         mean, var = self.init_action_distrib(init_action)
@@ -265,6 +263,9 @@ class OrderAwareCEMSolver:
         for start_idx in range(0, total_envs, self.batch_size):
             end_idx = min(start_idx + self.batch_size, total_envs)
             current_bs = end_idx - start_idx
+            self._solve_count += current_bs
+            solve_id = self._solve_count
+
             batch_mean = mean[start_idx:end_idx]
             batch_var = var[start_idx:end_idx]
 
