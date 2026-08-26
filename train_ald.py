@@ -52,10 +52,12 @@ def _freeze_visual_latent_frame(model: torch.nn.Module) -> None:
 
 
 def _train_predictor_side(model: torch.nn.Module) -> None:
-    """Enable all action-conditioned predictor-side parameters."""
+    """Enable exactly the action-conditioned predictor-side parameters."""
     model.action_encoder.requires_grad_(True)
     model.predictor.requires_grad_(True)
     model.pred_proj.requires_grad_(True)
+    if getattr(model, "factor_heads", None) is not None:
+        model.factor_heads.requires_grad_(False)
 
 
 def _count_parameters(module):
@@ -173,7 +175,7 @@ def run(cfg):
         f"total={total_params:,} trainable={trainable_params:,} "
         f"frozen={total_params - trainable_params:,}"
     )
-    print("Frozen: encoder + projector")
+    print("Frozen: encoder + projector (+ optional factor heads)")
     print("Trainable: action_encoder + predictor + pred_proj")
 
     optimizers = {
