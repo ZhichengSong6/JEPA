@@ -1,0 +1,23 @@
+_target_: order_aware_cem.OrderAwareCEMSolver
+model: ???
+batch_size: 1
+num_samples: 300
+var_scale: 1.0
+n_steps: 30
+topk: 30
+device: "cuda"
+seed: ${seed}
+
+# paired_raw: symmetric sampling only, ordinary raw-cost CEM update.
+# order_stop: same sampling/update, but stop once the sampled local landscape
+#             becomes even/curvature dominated.
+mode: order_stop
+
+# Natural order-transition threshold: odd RMS equals even-increment RMS.
+transition_ratio: 1.0
+
+# Prevent accidental stopping on the first noisy iterations.
+min_steps: 5
+
+eps: 1.0e-8
+verbose: true
