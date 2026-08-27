@@ -152,6 +152,8 @@ class TracedCEMSolver:
             mean_hist, var_hist = [], []
             elite_cost_mean_hist, elite_cost_min_hist = [], []
             candidate_hist = []
+            candidate_cost_hist = []
+            topk_index_hist = []
             final_batch_cost = None
 
             # Center BEFORE each CEM update: mu_0, ..., mu_{I-1}.
@@ -187,6 +189,8 @@ class TracedCEMSolver:
                 elite_cost_min_hist.append(topk_vals.min(dim=1).values.detach().cpu().numpy())
                 if self.save_candidates:
                     candidate_hist.append(candidates.detach().cpu().numpy())
+                    candidate_cost_hist.append(costs.detach().cpu().numpy())
+                    topk_index_hist.append(topk_inds.detach().cpu().numpy())
                 final_batch_cost = topk_vals.mean(dim=1).cpu().tolist()
 
             # Also save mu_I after the final update.
@@ -222,6 +226,12 @@ class TracedCEMSolver:
                 if self.save_candidates:
                     payload["candidates"] = np.stack(
                         [x[local] for x in candidate_hist], axis=0
+                    )
+                    payload["candidate_costs"] = np.stack(
+                        [x[local] for x in candidate_cost_hist], axis=0
+                    )
+                    payload["topk_indices"] = np.stack(
+                        [x[local] for x in topk_index_hist], axis=0
                     )
                 path = self.trace_dir / f"solve_{self._solve_index:06d}.npz"
                 np.savez_compressed(path, **payload)
