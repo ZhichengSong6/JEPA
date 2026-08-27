@@ -1,0 +1,12 @@
+_target_: traced_cem.TracedCEMSolver
+model: ???
+batch_size: 1
+num_samples: 300
+var_scale: 1.0
+n_steps: 30
+topk: 30
+device: "cuda"
+seed: ${seed}
+trace_dir: ${oc.env:JEPA_CEM_TRACE_DIR,outputs/pusht_cem_trace}
+save_candidates: false
+verbose: true
