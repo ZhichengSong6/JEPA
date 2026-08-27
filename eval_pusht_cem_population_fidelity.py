@@ -10,14 +10,17 @@ Requires traces produced with traced_cem.py + solver.save_candidates=true.
 
 For every sampled candidate:
   * planner score: model cost on the exact normalized CEM candidate;
-  * execution-consistent score: model cost after inverse-transform + raw Box
-    clipping + re-normalization;
-  * encoder cost: goal distance of the real simulator terminal image;
-  * physical cost: PushT terminal state cost.
+  * planner score: model cost on the exact normalized CEM candidate;
+  * clipped-counterfactual score: model cost after inverse-transform + Box
+    projection + re-normalization;
+  * encoder cost: goal distance of the REAL official-environment terminal image;
+  * physical cost: official PushT terminal state cost.
 
-This also reports how often CEM samples outside the executable raw Box[-1,1]
-region, because optimizer/model disagreement can otherwise be confused with
-world-model landscape error.
+Important: official stable-worldmodel currently inverse-transforms actions
+without clipping, and PushT step() accepts those values even when they exceed
+the declared Box[-1,1]. Therefore the physical replay here intentionally uses
+the UNCLIPPED inverse-transformed action. OOB statistics measure planner-induced
+action-support extrapolation; clipped scores are diagnostic counterfactuals only.
 """
 import argparse
 import json
@@ -139,7 +142,7 @@ def main():
     out = (
         Path(a.output_dir)
         if a.output_dir
-        else Path(a.trace_dir) / "cem_population_fidelity"
+        else Path(a.trace_dir) / "cem_population_fidelity_official"
     )
     out.mkdir(parents=True, exist_ok=True)
 
@@ -220,27 +223,31 @@ def main():
                     dtype=np.int64,
                 )
 
-                raw_preclip, raw = decode_normalized_candidates(
+                raw_official, raw_clipped = decode_normalized_candidates(
                     c_norm, action_scaler, action_block
                 )
-                clipped_norm = _normalize_actions(raw, action_scaler, horizon, action_block)
+                clipped_norm = _normalize_actions(
+                    raw_clipped, action_scaler, horizon, action_block
+                )
 
                 center = means[it]
                 deltas = (c_norm - center[None]).reshape(len(c_norm), -1)
                 radii = np.linalg.norm(deltas, axis=1)
-                oob = np.abs(raw_preclip) > 1.0
+                oob = np.abs(raw_official) > 1.0
                 clip_l2 = np.linalg.norm(
-                    (raw_preclip - raw).reshape(len(raw), -1), axis=1
+                    (raw_official - raw_clipped).reshape(len(raw_official), -1), axis=1
                 )
 
-                real_states = np.empty((len(raw), state.shape[-1]), dtype=np.float64)
-                real_images = [None] * len(raw)
-                for ci in range(len(raw)):
+                real_states = np.empty(
+                    (len(raw_official), state.shape[-1]), dtype=np.float64
+                )
+                real_images = [None] * len(raw_official)
+                for ci in range(len(raw_official)):
                     rr = _rollout_checkpoints(
                         env,
                         init_state,
                         goal_state,
-                        raw[ci],
+                        raw_official[ci],
                         [raw_horizon],
                         seed,
                     )[raw_horizon]
@@ -309,7 +316,14 @@ def main():
                         "candidate_radius_mean": float(np.mean(radii)),
                         "candidate_radius_median": float(np.median(radii)),
                         "sigma_l2": float(np.linalg.norm(vars_[it])),
-                        "raw_oob_candidate_fraction": float(np.mean(np.any(oob.reshape(len(raw), -1), axis=1))),
+                        "physical_execution_mode": "official_unclipped",
+                        "raw_oob_candidate_fraction": float(
+                            np.mean(
+                                np.any(
+                                    oob.reshape(len(raw_official), -1), axis=1
+                                )
+                            )
+                        ),
                         "raw_oob_scalar_fraction": float(np.mean(oob)),
                         "clip_l2_mean": float(np.mean(clip_l2)),
                         "rho_pred_phys": spearman(pred_cost, phys_cost),
@@ -344,6 +358,7 @@ def main():
                             "trace_cost": float(trace_cost[cj]),
                             "pred_cost": float(pred_cost[cj]),
                             "exec_pred_cost": float(exec_pred_cost[cj]),
+                            "physical_execution_mode": "official_unclipped",
                             "enc_cost": float(enc_cost[cj]),
                             "physical_cost": float(phys_cost[cj]),
                         })
