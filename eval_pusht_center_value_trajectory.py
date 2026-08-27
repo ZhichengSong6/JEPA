@@ -4,12 +4,15 @@
 For every traced solve, physically execute EVERY CEM mean mu_0 ... mu_I and
 record four notions of value:
   C_pred       model score on the exact planner-space mean;
-  C_pred_exec  model score after inverse-transform + raw Box clipping;
-  C_enc        latent goal cost of the real terminal image;
-  C_phys       physical PushT terminal cost.
+  C_pred       model score on the exact planner-space mean;
+  C_pred_clip  clipped-action counterfactual model score;
+  C_enc        latent goal cost of the REAL official-environment terminal image;
+  C_phys       official PushT terminal cost.
 
-This diagnoses basin-level failure that a small local perturbation probe cannot:
-C_pred may improve monotonically while C_phys first improves and then worsens.
+Official stable-worldmodel inverse-transforms planned actions without clipping,
+and PushT accepts those values even outside the declared Box[-1,1]. Therefore
+the physical replay intentionally executes the UNCLIPPED inverse-transformed
+CEM mean. clip_l2 / C_pred_clip are diagnostics for action-support extrapolation.
 """
 import argparse
 import json
@@ -139,7 +142,7 @@ def main():
     out = (
         Path(a.output_dir)
         if a.output_dir
-        else Path(a.trace_dir) / "center_value_trajectory"
+        else Path(a.trace_dir) / "center_value_trajectory_official"
     )
     out.mkdir(parents=True, exist_ok=True)
 
@@ -192,30 +195,40 @@ def main():
 
             real_states = []
             real_images = []
-            raw_plans = []
-            raw_preclip_plans = []
-            exec_norm_plans = []
+            raw_official_plans = []
+            raw_clipped_plans = []
+            clip_norm_plans = []
             for it in range(len(means)):
-                raw_pre = decode_normalized_plan(
+                raw_official = decode_normalized_plan(
                     means[it], action_scaler, action_block, clip=False
-                )
-                raw = np.clip(raw_pre, -1.0, 1.0).astype(np.float32)
+                ).astype(np.float32)
+                raw_clipped = np.clip(
+                    raw_official, -1.0, 1.0
+                ).astype(np.float32)
                 rr = _rollout_checkpoints(
-                    env, init_state, goal_state, raw, [raw_horizon], seed
+                    env,
+                    init_state,
+                    goal_state,
+                    raw_official,
+                    [raw_horizon],
+                    seed,
                 )[raw_horizon]
                 real_states.append(rr["state"])
                 real_images.append(rr["image"])
-                raw_plans.append(raw)
-                raw_preclip_plans.append(raw_pre)
-                exec_norm_plans.append(
+                raw_official_plans.append(raw_official)
+                raw_clipped_plans.append(raw_clipped)
+                clip_norm_plans.append(
                     _normalize_actions(
-                        raw[None], action_scaler, horizon, action_block
+                        raw_clipped[None],
+                        action_scaler,
+                        horizon,
+                        action_block,
                     )[0]
                 )
 
             real_states = np.asarray(real_states, dtype=np.float64)
             phys_cost, *_ = _physical_cost(real_states, goal_state)
-            exec_norm_plans = np.asarray(exec_norm_plans, dtype=np.float32)
+            clip_norm_plans = np.asarray(clip_norm_plans, dtype=np.float32)
 
             for label, model in zip(labels, models):
                 zg = _encode(
@@ -236,7 +249,7 @@ def main():
                     model,
                     transform,
                     current_image,
-                    exec_norm_plans,
+                    clip_norm_plans,
                     device,
                     a.model_batch_size,
                 )
@@ -267,8 +280,8 @@ def main():
                 )
 
                 for it in range(len(means)):
-                    raw_pre = np.asarray(raw_preclip_plans[it])
-                    raw = np.asarray(raw_plans[it])
+                    raw_official = np.asarray(raw_official_plans[it])
+                    raw_clipped = np.asarray(raw_clipped_plans[it])
                     rows.append({
                         "trace_source": a.trace_label,
                         "model": label,
@@ -278,8 +291,13 @@ def main():
                         "cem_iteration": int(it),
                         "center_shift_l2": float(np.linalg.norm(means[it] - means[0])),
                         "sigma_l2": float(np.linalg.norm(vars_[it])),
-                        "raw_oob_fraction": float(np.mean(np.abs(raw_pre) > 1.0)),
-                        "clip_l2": float(np.linalg.norm(raw_pre - raw)),
+                        "physical_execution_mode": "official_unclipped",
+                        "raw_oob_fraction": float(
+                            np.mean(np.abs(raw_official) > 1.0)
+                        ),
+                        "clip_l2": float(
+                            np.linalg.norm(raw_official - raw_clipped)
+                        ),
                         "physical_cost": float(phys_cost[it]),
                         "enc_cost": float(enc_cost[it]),
                         "pred_cost": float(pred_cost[it]),
