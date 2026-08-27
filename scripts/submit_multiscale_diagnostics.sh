@@ -56,7 +56,9 @@ else
   echo "Cleaning this round's validated smoke-only artifacts..."
   rm -rf \
     "$REPO/outputs/pusht_cem_population_trace_lewm_smoke" \
-    "$REPO/outputs/pusht_cem_population_trace_ald_smoke"
+    "$REPO/outputs/pusht_cem_population_trace_ald_smoke" \
+    "$PREV_LEWM_TRACE/null_response_decomposition_smoke" \
+    "$PREV_ALD_TRACE/null_response_decomposition_smoke"
   rm -f \
     "$LOG_DIR"/multiscale_diag_smoke_*.out \
     "$LOG_DIR"/multiscale_diag_smoke_*.err \
@@ -193,7 +195,8 @@ python -u eval_pusht_null_response_decomposition.py \
   --labels lewm ald \
   --gain-threshold 1e4 \
   --top-centers $NULL_TOP \
-  --num-directions $NULL_DIRS
+  --num-directions $NULL_DIRS \
+  --output-dir "\$PREV_LEWM_TRACE/null_response_decomposition_$TAG"
 
 echo
 echo "=== M3b: near-null decomposition from ALD formal centers ==="
@@ -204,7 +207,8 @@ python -u eval_pusht_null_response_decomposition.py \
   --labels lewm ald \
   --gain-threshold 1e4 \
   --top-centers $NULL_TOP \
-  --num-directions $NULL_DIRS
+  --num-directions $NULL_DIRS \
+  --output-dir "\$PREV_ALD_TRACE/null_response_decomposition_$TAG"
 
 echo
 echo "=== DONE ==="
@@ -212,8 +216,8 @@ echo "M1 LeWM: \$LEWM_TRACE/cem_population_fidelity/"
 echo "M1 ALD : \$ALD_TRACE/cem_population_fidelity/"
 echo "M2 LeWM: \$LEWM_TRACE/center_value_trajectory/"
 echo "M2 ALD : \$ALD_TRACE/center_value_trajectory/"
-echo "M3 LeWM: \$PREV_LEWM_TRACE/null_response_decomposition/"
-echo "M3 ALD : \$PREV_ALD_TRACE/null_response_decomposition/"
+echo "M3 LeWM: \$PREV_LEWM_TRACE/null_response_decomposition_$TAG/"
+echo "M3 ALD : \$PREV_ALD_TRACE/null_response_decomposition_$TAG/"
 EOF
 
 echo "Submitting $MODE multi-scale diagnostics to $NODE"
