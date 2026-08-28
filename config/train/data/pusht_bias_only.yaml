@@ -1,0 +1,13 @@
+# Full PushT offline sequence for strict Bias-Only calibration.
+# No privileged simulator state is loaded.
+dataset:
+  num_steps: ${eval:'${wm.history_size} + ${bias_only.rollout_horizon}'}
+  frameskip: 5
+  name: pusht_expert_train
+  keys_to_load:
+    - pixels
+    - action
+    - proprio
+  keys_to_cache:
+    - action
+    - proprio
