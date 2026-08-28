@@ -164,7 +164,7 @@ CUDA_VISIBLE_DEVICES=0 python -u eval_bias_only_offline.py \
 echo
 echo "=== B3: paired CEM iteration-budget evaluation ==="
 for I in 1 3 5 10 30; do
-  OUT="$CEM_DIR/bias_only_n300_i${I}_ep100.txt"
+  OUT="$CEM_DIR/bias_only_n300_i\${I}_ep100.txt"
   rm -f "\$OUT"
   echo
   echo "--- Bias-Only CEM: N=300 I=\$I K=30 episodes=100 ---"
