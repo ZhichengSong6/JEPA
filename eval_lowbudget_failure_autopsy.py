@@ -238,10 +238,6 @@ class TraceCEMSolver:
         self.topk = int(topk)
         self.device = torch.device(device)
         self.torch_gen = torch.Generator(device=self.device).manual_seed(int(seed))
-        try:
-            self._dtype = next(model.parameters()).dtype
-        except (AttributeError, StopIteration):
-            self._dtype = torch.float32
         self.trace: list[dict] = []
         self.current_global_env_indices = None
         self.current_raw_states = None
@@ -265,25 +261,22 @@ class TraceCEMSolver:
     def horizon(self):
         return int(self._config.horizon)
 
-    @property
-    def dtype(self):
-        return self._dtype
-
     def __call__(self, *args, **kwargs):
         return self.solve(*args, **kwargs)
 
     def init_action_distrib(self, n_envs, actions=None):
+        # Exact stable-worldmodel==0.0.6 behavior: default float32 tensors.
         var = self.var_scale * torch.ones(
-            [n_envs, self.horizon, self.action_dim], dtype=self.dtype
+            [n_envs, self.horizon, self.action_dim]
         )
         mean = (
-            torch.zeros([n_envs, 0, self.action_dim], dtype=self.dtype)
+            torch.zeros([n_envs, 0, self.action_dim])
             if actions is None else actions
         )
         remaining = self.horizon - mean.shape[1]
         if remaining > 0:
             new_mean = torch.zeros(
-                [n_envs, remaining, self.action_dim], dtype=self.dtype
+                [n_envs, remaining, self.action_dim]
             )
             mean = torch.cat([mean, new_mean], dim=1).to(mean.device)
         return mean, var
@@ -331,11 +324,12 @@ class TraceCEMSolver:
             for k, v in info_dict.items():
                 vb = v[start_idx:end_idx]
                 if torch.is_tensor(v):
-                    target_dtype = self.dtype if vb.is_floating_point() else None
-                    vb = (
-                        vb.to(device=self.device, dtype=target_dtype)
-                        .unsqueeze(1)
-                        .expand(current_bs, self.num_samples, *vb.shape[1:])
+                    # Exact 0.0.6 CEM behavior: do not pre-move/pre-cast
+                    # info tensors here. LeWM.get_cost() moves its tensor
+                    # entries to the model device.
+                    vb = vb.unsqueeze(1)
+                    vb = vb.expand(
+                        current_bs, self.num_samples, *vb.shape[2:]
                     )
                 elif isinstance(v, np.ndarray):
                     vb = np.repeat(vb[:, None, ...], self.num_samples, axis=1)
@@ -344,11 +338,16 @@ class TraceCEMSolver:
             for step in range(self.n_steps):
                 candidates = torch.randn(
                     current_bs, self.num_samples, self.horizon, self.action_dim,
-                    generator=self.torch_gen, device=self.device, dtype=self.dtype,
+                    generator=self.torch_gen, device=self.device,
                 )
                 candidates = candidates * batch_var.unsqueeze(1) + batch_mean.unsqueeze(1)
                 candidates[:, 0] = batch_mean
-                costs = self.model.get_cost(expanded, candidates)
+                # IMPORTANT: exact 0.0.6 behavior. LeWM.get_cost() mutates
+                # its input dict in-place by adding goal_emb/action/emb/
+                # predicted_emb, so every CEM iteration must receive a fresh
+                # shallow copy.
+                current_info = expanded.copy()
+                costs = self.model.get_cost(current_info, candidates)
 
                 vals, inds = torch.topk(costs, k=self.topk, dim=1, largest=False)
                 bi = torch.arange(current_bs, device=self.device).unsqueeze(1).expand(-1, self.topk)
@@ -632,6 +631,11 @@ def run(cfg: DictConfig):
     world.set_policy(policy)
 
     print("===== CLOSED-LOOP TRACE EVAL =====")
+    try:
+        import importlib.metadata as _ilm
+        print("stable-worldmodel=" + _ilm.version("stable-worldmodel"))
+    except Exception:
+        pass
     print(f"policy={cfg.policy}")
     print(
         f"N={cfg.solver.num_samples} I={cfg.solver.n_steps} "
