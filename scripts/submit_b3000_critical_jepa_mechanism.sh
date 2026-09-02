@@ -79,6 +79,8 @@ CUDA_VISIBLE_DEVICES=0 python -u eval_b3000_critical_jepa_mechanism.py \
   +mechanism.replay_iterations='[0,1]' \
   +mechanism.eval_indices='[0,1]' \
   +mechanism.model_batch_size=64 \
+  +mechanism.replay_state_tol_px=1.0 \
+  +mechanism.replay_state_tol_deg=1.0 \
   2>&1
 
 echo "=== SLURM DONE ==="
