@@ -737,6 +737,9 @@ def run(cfg: DictConfig):
                         candidates = np.asarray(
                             tr["candidates"][li, it], dtype=np.float32
                         )
+                        native_source_cost = np.asarray(
+                            tr["predicted_costs"][li, it], dtype=np.float64
+                        )
                         raw_candidates = _normalized_to_raw(
                             candidates, process["action"], action_block
                         )
@@ -817,6 +820,8 @@ def run(cfg: DictConfig):
                                         "selection_regret_pred": float("nan"),
                                         "mean_pred_enc_mse": float("nan"),
                                         "median_pred_enc_mse": float("nan"),
+                                        "native_c1_max_abs": float("nan"),
+                                        "native_c1_rho": float("nan"),
                                     })
                                     continue
 
@@ -840,6 +845,43 @@ def run(cfg: DictConfig):
                                 pm = _selection_metrics(
                                     pred_cost, phys, k
                                 )
+
+                                native_c1_max_abs = float("nan")
+                                native_c1_rho = float("nan")
+                                if (
+                                    ctx == 1
+                                    and model_label == source_label
+                                ):
+                                    native_c1_max_abs = float(np.max(
+                                        np.abs(
+                                            pred_cost
+                                            - native_source_cost
+                                        )
+                                    ))
+                                    scale = float(max(
+                                        1.0,
+                                        np.max(np.abs(native_source_cost)),
+                                    ))
+                                    native_c1_rho = _spearman(
+                                        pred_cost, native_source_cost
+                                    )
+                                    if (
+                                        native_c1_max_abs > 2e-4 * scale
+                                        or (
+                                            np.isfinite(native_c1_rho)
+                                            and native_c1_rho < 0.999999
+                                        )
+                                    ):
+                                        raise RuntimeError(
+                                            "C1 mechanism scoring does not "
+                                            "reproduce native CEM cost: "
+                                            f"env={env_i} "
+                                            f"source={source_label} "
+                                            f"solve={solve_idx} iter={it} "
+                                            f"max_abs={native_c1_max_abs:.6g} "
+                                            f"rho={native_c1_rho}"
+                                        )
+
                                 pop_rows.append({
                                     **base_meta,
                                     "scoring_model": model_label,
@@ -869,6 +911,10 @@ def run(cfg: DictConfig):
                                     "mean_pred_enc_mse": float(np.mean(dyn)),
                                     "median_pred_enc_mse":
                                         float(np.median(dyn)),
+                                    "native_c1_max_abs":
+                                        native_c1_max_abs,
+                                    "native_c1_rho":
+                                        native_c1_rho,
                                 })
 
                                 cand_pred[(model_label, ctx)].append(
