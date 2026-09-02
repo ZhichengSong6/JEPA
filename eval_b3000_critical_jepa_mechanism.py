@@ -741,10 +741,9 @@ def run(cfg: DictConfig):
     replay_env = gym.make(str(cfg.world.env_name), render_mode="rgb_array")
     runs = {"lewm": lewm, "ald_tf": ald}
 
-    # Reconstruct the ACTUAL solve-0 executed mean for each source trajectory.
-    mean_cache = {}
+    # Use the ACTUAL recorded closed-loop trajectory. Do not reconstruct
+    # solve-1 history by resetting the simulator from a 7D observation state.
     mean_rows = []
-    mean_candidate_payload = []
     try:
         for env_i in critical:
             goal = np.asarray(goal_states[env_i], dtype=np.float64)
@@ -752,89 +751,91 @@ def run(cfg: DictConfig):
                 tr0, li0 = _find_trace_for_env(
                     source["solver"].trace, env_i, 0
                 )
-                if li0 is None:
+                tr1, li1 = _find_trace_for_env(
+                    source["solver"].trace, env_i, 1
+                )
+                if li0 is None or li1 is None:
                     continue
+
+                recorder = source["recorder"]
+                key0 = (0, int(env_i))
+                key1 = (1, int(env_i))
+                if (
+                    key0 not in recorder.solve_step_by_env
+                    or key1 not in recorder.solve_step_by_env
+                ):
+                    raise RuntimeError(
+                        f"Missing recorded solve timing for "
+                        f"env={env_i} source={source_label}"
+                    )
+                step0 = int(recorder.solve_step_by_env[key0])
+                step1 = int(recorder.solve_step_by_env[key1])
+                rec = _record_map(recorder, env_i)
+                if step0 not in rec or step1 not in rec:
+                    raise RuntimeError(
+                        f"Missing recorded states at solve boundaries for "
+                        f"env={env_i} source={source_label}"
+                    )
+
                 info0 = _slice_info(tr0["solver_info"], li0)
-                variations = _extract_variations(info0)
                 norm_mean = np.asarray(
                     tr0["mean_after"][li0, -1], dtype=np.float32
                 )[None]
                 raw_mean = _normalized_to_raw(
                     norm_mean, process["action"], action_block
                 )[0]
-                replay = _replay_mean_with_coarse_history(
-                    replay_env,
-                    np.asarray(tr0["solve_start_states"][li0], dtype=np.float64),
-                    goal,
-                    raw_mean,
-                    variations,
-                    seed=3_000_000 + 10_000 * env_i
-                         + (0 if source_label == "lewm" else 500),
-                    action_block=action_block,
-                )
-                replay["raw_actions"] = raw_mean
-                replay["transform"] = transform
-                mean_cache[(source_label, env_i)] = replay
 
-                tr1, li1 = _find_trace_for_env(
-                    source["solver"].trace, env_i, 1
+                action_steps = list(range(step0, step1))
+                if any(s not in rec for s in action_steps):
+                    raise RuntimeError(
+                        f"Incomplete executed action history for "
+                        f"env={env_i} source={source_label}"
+                    )
+                actual_actions = np.asarray(
+                    [rec[s]["action"] for s in action_steps],
+                    dtype=np.float32,
                 )
-                if li1 is not None:
-                    recorded_next = np.asarray(
-                        tr1["solve_start_states"][li1], dtype=np.float64
+                if actual_actions.shape != raw_mean.shape:
+                    raise RuntimeError(
+                        f"Executed action shape {actual_actions.shape} != "
+                        f"CEM mean shape {raw_mean.shape} for "
+                        f"env={env_i} source={source_label}"
                     )
-                    pos_err = float(np.max(np.abs(
-                        replay["final_state"][:4] - recorded_next[:4]
-                    )))
-                    theta_err = float(_angle_error_rad(
-                        replay["final_state"][4], recorded_next[4]
-                    ))
-                    theta_err_deg = float(np.degrees(theta_err))
-                    replay_close = bool(
-                        pos_err <= replay_state_tol_px
-                        and theta_err_deg <= replay_state_tol_deg
+                action_max_abs = float(np.max(np.abs(
+                    actual_actions - raw_mean
+                )))
+                if action_max_abs > 1e-4:
+                    raise RuntimeError(
+                        "Official policy did not execute the recorded final "
+                        "CEM mean as expected: "
+                        f"env={env_i} source={source_label} "
+                        f"max_abs_action={action_max_abs:.6g}"
                     )
-                    if not replay_close:
-                        raise RuntimeError(
-                            "Mean-plan replay is not sufficiently close to "
-                            "recorded solve-1 state: "
-                            f"env={env_i} source={source_label} "
-                            f"pos_max_px={pos_err:.6g} "
-                            f"theta_deg={theta_err_deg:.6g} "
-                            f"tol=({replay_state_tol_px}px,"
-                            f"{replay_state_tol_deg}deg). "
-                            "PushT observation state is not a complete physics "
-                            "snapshot, so bitwise replay is not expected; this "
-                            "guard only rejects materially different replays."
-                        )
-                else:
-                    recorded_next = None
-                    pos_err = float("nan")
-                    theta_err = float("nan")
-                    theta_err_deg = float("nan")
-                    replay_close = False
+
+                actual_start_state = np.asarray(
+                    rec[step0]["state"], dtype=np.float64
+                )
+                actual_next_state = np.asarray(
+                    rec[step1]["state"], dtype=np.float64
+                )
+                actual_next_image = np.asarray(rec[step1]["pixels"])
 
                 start_cost = float(_physical_cost(
-                    np.asarray(tr0["solve_start_states"][li0])[None], goal
+                    actual_start_state[None], goal
                 )[0][0])
                 final_cost = float(_physical_cost(
-                    replay["final_state"][None], goal
+                    actual_next_state[None], goal
                 )[0][0])
 
-                # Exact processed C1 start and exact solver goal.
                 current_px = info0["pixels"]
                 if not torch.is_tensor(current_px):
                     current_px = torch.as_tensor(current_px)
                 current_px = current_px[0, -1:].detach().cpu()
 
-                real_emb = {}
-                pred_emb = {}
-                goal_emb = {}
-                enc_goal_cost = {}
                 for model_label, model_run in runs.items():
                     model = model_run["model"]
                     zr = _encode(
-                        model, transform, [replay["final_image"]],
+                        model, transform, [actual_next_image],
                         device, model_batch,
                     )[0]
                     zg = _goal_embedding_from_solver(
@@ -850,40 +851,28 @@ def run(cfg: DictConfig):
                         device,
                         model_batch,
                     )[0]
-                    real_emb[model_label] = zr.detach().cpu().numpy()
-                    pred_emb[model_label] = zp.detach().cpu().numpy()
-                    goal_emb[model_label] = zg.detach().cpu().numpy()
-                    enc_goal_cost[model_label] = float(
-                        torch.sum((zr - zg) ** 2).cpu()
-                    )
                     mean_rows.append({
                         "eval_index": int(env_i),
                         "case_type": current_types[env_i],
                         "source_trajectory": source_label,
                         "scoring_model": model_label,
+                        "solve0_world_step": step0,
+                        "solve1_world_step": step1,
+                        "executed_action_count": int(len(actual_actions)),
+                        "executed_vs_cem_mean_max_abs": action_max_abs,
                         "start_phys_cost": start_cost,
                         "next_solve_phys_cost": final_cost,
                         "physical_progress": start_cost - final_cost,
-                        "next_state_replay_pos_max_abs": pos_err,
-                        "next_state_replay_theta_abs_rad": theta_err,
-                        "next_state_replay_theta_abs_deg": theta_err_deg,
-                        "next_state_replay_within_tolerance": replay_close,
                         "pred_endpoint_mse": float(
                             torch.mean((zp - zr) ** 2).cpu()
                         ),
                         "pred_goal_cost": float(
                             torch.sum((zp - zg) ** 2).cpu()
                         ),
-                        "enc_goal_cost": enc_goal_cost[model_label],
+                        "enc_goal_cost": float(
+                            torch.sum((zr - zg) ** 2).cpu()
+                        ),
                     })
-                mean_candidate_payload.append({
-                    "eval_index": env_i,
-                    "source": source_label,
-                    "real_emb_lewm": real_emb["lewm"],
-                    "real_emb_ald": real_emb["ald_tf"],
-                    "pred_emb_lewm": pred_emb["lewm"],
-                    "pred_emb_ald": pred_emb["ald_tf"],
-                })
 
         _write_csv(outdir / "mean_plan_causal_chain.csv", mean_rows)
 
@@ -943,15 +932,14 @@ def run(cfg: DictConfig):
                             action_block=action_block,
                         )
                     else:
-                        replay = mean_cache.get((source_label, env_i))
-                        if replay is None:
-                            raise RuntimeError(
-                                f"Missing solve-0 history cache for "
-                                f"{source_label} env={env_i}"
-                            )
-                        histories = _build_solve1_history(
-                            replay, exact_current,
-                            action_block, max(contexts),
+                        histories = _build_recorded_solve1_history(
+                            source["recorder"],
+                            env_i,
+                            solve_idx,
+                            exact_current,
+                            transform,
+                            action_block,
+                            max(contexts),
                         )
 
                     goal_z = {
@@ -1328,8 +1316,9 @@ def run(cfg: DictConfig):
                 "missing C2/C3 contexts are left unavailable."
             ),
             "solve1_prefix": (
-                "Actual closed-loop prefix reconstructed from the exact solve-0 "
-                "CEM mean that the official policy executed."
+                "Actual closed-loop observations and raw actions recorded "
+                "directly during the official policy run; no simulator-reset "
+                "reconstruction is used."
             ),
         },
         "closed_loop_audit": closed_audit,
@@ -1353,12 +1342,11 @@ def run(cfg: DictConfig):
                 "history, short-prefix predictor drift is directly implicated."
             ),
             "mean_plan_chain": (
-                "next_state replay audit requires the executed CEM mean to "
-                "reproduce the recorded next solve state within a small physical "
-                "tolerance. PushT's 7D observation is not a complete simulator "
-                "snapshot (e.g. block velocity/contact state are omitted), so "
-                "bitwise replay is not expected. physical_progress then links "
-                "first-solve model choice to the next planning basin."
+                "The official policy's actually returned raw actions are "
+                "compared directly with the solve-0 final CEM mean. The next "
+                "solve state/image are taken directly from the same recorded "
+                "closed-loop run, so no incomplete-state simulator replay is "
+                "used for the causal-chain evidence."
             ),
         },
     }
