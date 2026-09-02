@@ -229,6 +229,7 @@ class TraceCEMSolver:
         topk=3,
         device="cuda",
         seed=42,
+        state_scaler=None,
     ):
         self.model = model
         self.batch_size = int(batch_size)
@@ -239,8 +240,8 @@ class TraceCEMSolver:
         self.device = torch.device(device)
         self.torch_gen = torch.Generator(device=self.device).manual_seed(int(seed))
         self.trace: list[dict] = []
-        self.current_global_env_indices = None
-        self.current_raw_states = None
+        self.state_scaler = state_scaler
+        self._env_id_to_index = {}
 
     def configure(self, *, action_space: gym.Space, n_envs: int, config: Any):
         self._action_space = action_space
@@ -284,10 +285,53 @@ class TraceCEMSolver:
     @torch.inference_mode()
     def solve(self, info_dict, init_action=None):
         total_envs = len(next(iter(info_dict.values())))
-        global_idx = np.asarray(self.current_global_env_indices, dtype=np.int64)
-        raw_states = np.asarray(self.current_raw_states, dtype=np.float64)
-        if len(global_idx) != total_envs or len(raw_states) != total_envs:
-            raise RuntimeError("Tracing policy did not provide solve-start metadata.")
+
+        # Recover stable global env identity directly from the official policy's
+        # processed info dict. EverythingToInfoWrapper supplies a persistent
+        # per-episode numeric "id"; the first solver call contains all envs in
+        # canonical order, and later subset replans keep those ids.
+        ids = info_dict.get("id", None)
+        if ids is None:
+            raise RuntimeError("Expected numeric 'id' in solver info_dict.")
+        ids_np = _numpy(ids)
+        if ids_np.ndim > 1:
+            ids_np = ids_np.reshape(total_envs, -1)[:, -1]
+        ids_np = np.asarray(ids_np).reshape(-1)
+        if len(self._env_id_to_index) == 0:
+            if total_envs != self.n_envs:
+                raise RuntimeError(
+                    "First tracing solve did not contain every environment; "
+                    f"got {total_envs}, expected {self.n_envs}."
+                )
+            self._env_id_to_index = {
+                int(ids_np[i]): int(i) for i in range(total_envs)
+            }
+        try:
+            global_idx = np.asarray(
+                [self._env_id_to_index[int(x)] for x in ids_np],
+                dtype=np.int64,
+            )
+        except KeyError as exc:
+            raise RuntimeError(
+                f"Unknown environment id during replan: {exc}"
+            ) from exc
+
+        # The official WorldModelPolicy has already applied StandardScaler to
+        # state before calling the solver. Invert it here, diagnosis-only, to
+        # recover the exact solve-start PushT state without touching policy
+        # internals or action buffers.
+        st = info_dict.get("state", None)
+        if st is None:
+            raise RuntimeError("Expected 'state' in solver info_dict.")
+        st_np = _numpy(st)
+        if st_np.ndim >= 3:
+            st_np = st_np[:, -1]
+        st_np = np.asarray(st_np, dtype=np.float64).reshape(total_envs, -1)
+        raw_states = (
+            self.state_scaler.inverse_transform(st_np)
+            if self.state_scaler is not None
+            else st_np
+        ).astype(np.float64)
 
         # Match the older stable-worldmodel CEM used by this LeWM checkout:
         # init_action_distrib() itself zero-pads a partial warm start to the
@@ -388,61 +432,6 @@ class TraceCEMSolver:
             "mean": [mean.detach().cpu()],
             "var": [var.detach().cpu()],
         }
-
-
-class TracingWorldModelPolicy(swm.policy.WorldModelPolicy):
-    """Thin metadata hook around the *official* 0.0.6 WorldModelPolicy.
-
-    We intentionally do NOT reimplement get_action().  The official policy
-    remains responsible for preprocessing, action buffering, warm-start,
-    solver invocation, inverse action scaling, and dead-env handling.
-
-    This hook only predicts which global env indices will replan on this call
-    and snapshots their raw simulator states so TraceCEMSolver can attach
-    physical states to the corresponding solver batch.
-    """
-
-    def get_action(self, info_dict: dict, **kwargs):
-        n_envs = self.env.num_envs
-        raw_states_all = _latest_state(info_dict["state"])
-
-        # Reproduce only the *decision of who replans*, without mutating
-        # policy state.  super().get_action() below performs the real logic.
-        needs_flush = info_dict.get("_needs_flush", None)
-        terminated = info_dict.get("terminated", None)
-        if terminated is None:
-            dead = np.zeros(n_envs, dtype=bool)
-        else:
-            dead = np.asarray(_numpy(terminated), dtype=bool)
-            if dead.ndim > 1:
-                dead = dead.reshape(n_envs, -1)[:, -1]
-
-        replan_idx = []
-        for i in range(n_envs):
-            will_flush = False
-            if needs_flush is not None:
-                nf = np.asarray(_numpy(needs_flush), dtype=bool)
-                if nf.ndim > 1:
-                    nf = nf.reshape(n_envs, -1)[:, -1]
-                will_flush = bool(nf[i])
-            buffer_empty_after_flush = will_flush or len(self._action_buffer[i]) == 0
-            if buffer_empty_after_flush and not bool(dead[i]):
-                replan_idx.append(i)
-
-        if replan_idx:
-            self.solver.current_global_env_indices = np.asarray(
-                replan_idx, dtype=np.int64
-            )
-            self.solver.current_raw_states = raw_states_all[replan_idx].copy()
-        else:
-            self.solver.current_global_env_indices = np.empty(0, dtype=np.int64)
-            self.solver.current_raw_states = np.empty(
-                (0, raw_states_all.shape[-1]), dtype=np.float64
-            )
-
-        # All actual planning/execution behavior is the installed official
-        # stable-worldmodel==0.0.6 implementation.
-        return super().get_action(info_dict, **kwargs)
 
 
 def _reset_replay_env(env, state, goal, seed):
@@ -604,10 +593,13 @@ def run(cfg: DictConfig):
         topk=int(cfg.solver.topk),
         device=str(cfg.solver.device),
         seed=int(cfg.seed),
+        state_scaler=process.get("state"),
     )
     plan_config = swm.PlanConfig(**cfg.plan_config)
     transform = {"pixels": img_transform(cfg), "goal": img_transform(cfg)}
-    policy = TracingWorldModelPolicy(
+    # Use the installed official stable-worldmodel==0.0.6 policy verbatim.
+    # Only the solver is instrumented.
+    policy = swm.policy.WorldModelPolicy(
         solver=solver, config=plan_config, process=process, transform=transform
     )
     world.set_policy(policy)
