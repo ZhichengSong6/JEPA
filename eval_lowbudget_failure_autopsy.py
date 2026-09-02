@@ -51,7 +51,6 @@ from omegaconf import DictConfig, OmegaConf
 from sklearn import preprocessing
 
 from eval import get_dataset, get_episodes_length, img_transform
-from stable_worldmodel.solver.utils import prepare_init_action
 
 
 def _numpy(x):
@@ -297,10 +296,11 @@ class TraceCEMSolver:
         if len(global_idx) != total_envs or len(raw_states) != total_envs:
             raise RuntimeError("Tracing policy did not provide solve-start metadata.")
 
-        init_action = prepare_init_action(
-            self.model, info_dict, init_action, self.horizon,
-            n_envs=total_envs, action_dim=self.action_dim,
-        )
+        # Match the older stable-worldmodel CEM used by this LeWM checkout:
+        # init_action_distrib() itself zero-pads a partial warm start to the
+        # planning horizon.  Newer stable-worldmodel moved that behavior
+        # behind solver.utils.prepare_init_action(), which is not available
+        # in the server environment.
         mean, var = self.init_action_distrib(total_envs, init_action)
         mean, var = mean.to(self.device), var.to(self.device)
 
