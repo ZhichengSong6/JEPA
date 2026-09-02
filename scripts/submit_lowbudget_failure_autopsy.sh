@@ -66,7 +66,8 @@ CUDA_VISIBLE_DEVICES=0 python -u eval_lowbudget_failure_autopsy.py \
   eval.eval_budget=25 \
   +autopsy.output_dir="$OUT_DIR/smoke" \
   +autopsy.replay_iterations='[0,1]' \
-  +autopsy.num_success_controls=2
+  +autopsy.num_success_controls=2 \
+  2>&1
 
 echo "=== SLURM DONE ==="
 EOF
@@ -117,7 +118,8 @@ CUDA_VISIBLE_DEVICES=0 python -u eval_lowbudget_failure_autopsy.py \
   +autopsy.output_dir="$OUT_DIR/formal" \
   +autopsy.replay_iterations='[0,1,3,5,9]' \
   +autopsy.num_success_controls=12 \
-  +autopsy.expected_success=88.0
+  +autopsy.expected_success=88.0 \
+  2>&1
 
 echo "=== SLURM DONE ==="
 echo "Results: $OUT_DIR/formal"
