@@ -70,8 +70,9 @@ Questions:
   3. Causal prefix:
      How do C=1,2,3 affect ranking/tail fidelity and endpoint MSE?
   4. Mean-plan causal chain:
-     Does the exact solve-0 CEM mean reproduce solve-1 state, and how much
-     physical progress does each source trajectory make before solve 1?
+     Do the official policy's actually returned raw actions match the solve-0
+     final CEM mean, and how much physical progress does the directly recorded
+     closed-loop trajectory make before solve 1?
 
 Files:
   closed_loop_audit.json
