@@ -391,82 +391,58 @@ class TraceCEMSolver:
 
 
 class TracingWorldModelPolicy(swm.policy.WorldModelPolicy):
-    """Official WorldModelPolicy.get_action with solve-start metadata hooks."""
+    """Thin metadata hook around the *official* 0.0.6 WorldModelPolicy.
+
+    We intentionally do NOT reimplement get_action().  The official policy
+    remains responsible for preprocessing, action buffering, warm-start,
+    solver invocation, inverse action scaling, and dead-env handling.
+
+    This hook only predicts which global env indices will replan on this call
+    and snapshots their raw simulator states so TraceCEMSolver can attach
+    physical states to the corresponding solver batch.
+    """
 
     def get_action(self, info_dict: dict, **kwargs):
-        assert hasattr(self, "env"), "Environment not set for policy"
-
-        raw_states_all = _latest_state(info_dict["state"])
-        info_dict = self._prepare_info(info_dict)
         n_envs = self.env.num_envs
+        raw_states_all = _latest_state(info_dict["state"])
 
-        needs_flush = info_dict.pop("_needs_flush", None)
-        if needs_flush is not None:
-            for i in range(n_envs):
-                if needs_flush[i]:
-                    self._action_buffer[i].clear()
-                    if self._next_init is not None:
-                        self._next_init[i] = 0
+        # Reproduce only the *decision of who replans*, without mutating
+        # policy state.  super().get_action() below performs the real logic.
+        needs_flush = info_dict.get("_needs_flush", None)
+        terminated = info_dict.get("terminated", None)
+        if terminated is None:
+            dead = np.zeros(n_envs, dtype=bool)
+        else:
+            dead = np.asarray(_numpy(terminated), dtype=bool)
+            if dead.ndim > 1:
+                dead = dead.reshape(n_envs, -1)[:, -1]
 
-        terminated = info_dict.get("terminated")
-        dead = (
-            np.asarray(terminated, dtype=bool)
-            if terminated is not None else np.zeros(n_envs, dtype=bool)
-        )
-        replan_idx = [
-            i for i in range(n_envs)
-            if len(self._action_buffer[i]) == 0 and not dead[i]
-        ]
+        replan_idx = []
+        for i in range(n_envs):
+            will_flush = False
+            if needs_flush is not None:
+                nf = np.asarray(_numpy(needs_flush), dtype=bool)
+                if nf.ndim > 1:
+                    nf = nf.reshape(n_envs, -1)[:, -1]
+                will_flush = bool(nf[i])
+            buffer_empty_after_flush = will_flush or len(self._action_buffer[i]) == 0
+            if buffer_empty_after_flush and not bool(dead[i]):
+                replan_idx.append(i)
 
         if replan_idx:
-            idx_tensor = torch.as_tensor(replan_idx, dtype=torch.long)
-            sliced = {}
-            for k, v in info_dict.items():
-                if torch.is_tensor(v):
-                    sliced[k] = v[idx_tensor]
-                elif isinstance(v, np.ndarray):
-                    sliced[k] = v[replan_idx]
-                elif isinstance(v, list):
-                    sliced[k] = [v[i] for i in replan_idx]
-                else:
-                    sliced[k] = v
-
-            sliced_init = (
-                self._next_init[idx_tensor]
-                if self._next_init is not None else None
+            self.solver.current_global_env_indices = np.asarray(
+                replan_idx, dtype=np.int64
+            )
+            self.solver.current_raw_states = raw_states_all[replan_idx].copy()
+        else:
+            self.solver.current_global_env_indices = np.empty(0, dtype=np.int64)
+            self.solver.current_raw_states = np.empty(
+                (0, raw_states_all.shape[-1]), dtype=np.float64
             )
 
-            self.solver.current_global_env_indices = np.asarray(replan_idx, dtype=np.int64)
-            self.solver.current_raw_states = raw_states_all[replan_idx].copy()
-            outputs = self.solver(sliced, init_action=sliced_init)
-
-            actions = outputs["actions"]
-            keep = self.cfg.receding_horizon
-            plan, rest = actions[:, :keep], actions[:, keep:]
-
-            if self.cfg.warm_start and rest.shape[1] > 0:
-                if self._next_init is None:
-                    self._next_init = torch.zeros(
-                        n_envs, rest.shape[1], rest.shape[2], dtype=rest.dtype
-                    )
-                self._next_init[idx_tensor] = rest
-            elif not self.cfg.warm_start:
-                self._next_init = None
-
-            plan = plan.reshape(len(replan_idx), self.flatten_receding_horizon, -1)
-            for row, env_i in enumerate(replan_idx):
-                self._action_buffer[env_i].extend(plan[row])
-
-        action_dim = self.env.single_action_space.shape[-1]
-        action = torch.full((n_envs, action_dim), float("nan"))
-        for i in range(n_envs):
-            if not dead[i]:
-                action[i] = self._action_buffer[i].popleft()
-
-        action = action.reshape(*self.env.action_space.shape).float().numpy()
-        if "action" in self.process:
-            action = self.process["action"].inverse_transform(action)
-        return action
+        # All actual planning/execution behavior is the installed official
+        # stable-worldmodel==0.0.6 implementation.
+        return super().get_action(info_dict, **kwargs)
 
 
 def _reset_replay_env(env, state, goal, seed):
