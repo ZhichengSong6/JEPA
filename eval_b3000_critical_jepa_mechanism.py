@@ -611,8 +611,6 @@ def run(cfg: DictConfig):
         "replay_iterations", [0, 3, 9]
     )))
     model_batch = int(mcfg.get("model_batch_size", 64))
-    replay_state_tol_px = float(mcfg.get("replay_state_tol_px", 1.0))
-    replay_state_tol_deg = float(mcfg.get("replay_state_tol_deg", 1.0))
     reference_manifest = str(mcfg.get("reference_manifest", "")).strip()
     manual_indices = list(map(int, mcfg.get("eval_indices", [])))
 
@@ -645,13 +643,27 @@ def run(cfg: DictConfig):
     print("No training. No CEM modification. Oracle is diagnosis-only.")
     print("============================================================")
 
-    lewm = _run_closed_loop(
+    pre_reference_rows = None
+    if reference_manifest:
+        pre_reference_rows = _read_reference_manifest(
+            Path(reference_manifest)
+        )
+        record_indices = [
+            r["eval_index"] for r in pre_reference_rows
+            if r["case_type"] != "both_success"
+        ]
+    elif manual_indices:
+        record_indices = manual_indices
+    else:
+        record_indices = list(range(len(eval_rows)))
+
+    lewm = _run_closed_loop_recording(
         cfg, dataset, process, lewm_policy, "lewm",
-        eval_episodes, eval_start,
+        eval_episodes, eval_start, record_indices,
     )
-    ald = _run_closed_loop(
+    ald = _run_closed_loop_recording(
         cfg, dataset, process, ald_policy, "ald_tf",
-        eval_episodes, eval_start,
+        eval_episodes, eval_start, record_indices,
     )
 
     current_types = [
@@ -659,10 +671,9 @@ def run(cfg: DictConfig):
         for i in range(len(eval_rows))
     ]
 
-    reference_rows = None
+    reference_rows = pre_reference_rows
     if reference_manifest:
         ref_path = Path(reference_manifest)
-        reference_rows = _read_reference_manifest(ref_path)
         if len(reference_rows) != len(eval_rows):
             raise RuntimeError(
                 f"Reference manifest length {len(reference_rows)} != "
@@ -1308,8 +1319,6 @@ def run(cfg: DictConfig):
             "contexts": contexts,
             "replay_iterations": replay_iterations,
             "action_block": action_block,
-            "replay_state_tol_px": replay_state_tol_px,
-            "replay_state_tol_deg": replay_state_tol_deg,
             "lewm_policy": lewm_policy,
             "ald_tf_policy": ald_policy,
             "cem_modified": False,
