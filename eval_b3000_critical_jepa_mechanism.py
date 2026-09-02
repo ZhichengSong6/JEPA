@@ -69,11 +69,11 @@ from eval_lowbudget_failure_autopsy import (
     _spearman,
 )
 from eval_b3000_paired_failure_analysis import (
+    CrossTraceCEMSolver,
     _case_type,
     _extract_variations,
     _normalized_to_raw,
     _rank_percentile,
-    _run_closed_loop,
     _slice_info,
     _topk_recall,
 )
@@ -106,6 +106,205 @@ def _numeric_summary(values):
         "p10": float(np.percentile(x, 10)),
         "p90": float(np.percentile(x, 90)),
     }
+
+
+class RecordingWorldModelPolicy(swm.policy.WorldModelPolicy):
+    """Official 0.0.6 policy plus passive closed-loop observation/action logging.
+
+    Planning behavior is unchanged: get_action delegates to super() exactly.
+    We only snapshot raw observations before the call and raw actions returned
+    by the official policy for selected environment indices.
+    """
+
+    def __init__(self, *args, record_indices=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.record_indices = sorted(set(map(int, record_indices or [])))
+        self.history = {i: [] for i in self.record_indices}
+        self.solve_step_by_env = {}
+        self._world_step = 0
+
+    @staticmethod
+    def _latest(v, env_i):
+        x = np.asarray(v)
+        y = x[int(env_i)]
+        # World history_size=1 gives an explicit time dimension.
+        if y.ndim >= 2 and y.shape[0] == 1:
+            y = y[-1]
+        return np.asarray(y).copy()
+
+    def get_action(self, info_dict: dict, **kwargs):
+        snaps = {}
+        for i in self.record_indices:
+            if i >= len(info_dict["state"]):
+                continue
+            snaps[i] = {
+                "world_step": int(self._world_step),
+                "state": self._latest(info_dict["state"], i),
+                "pixels": self._latest(info_dict["pixels"], i),
+            }
+
+        before = len(self.solver.trace)
+        action = super().get_action(info_dict, **kwargs)
+        after = len(self.solver.trace)
+
+        a = np.asarray(action)
+        for i, snap in snaps.items():
+            snap["action"] = np.asarray(a[i]).copy()
+            self.history[i].append(snap)
+
+        if after > before:
+            for tr in self.solver.trace[before:after]:
+                solve_idx = int(tr["solve_index"])
+                for env_i in np.asarray(
+                    tr["global_env_indices"], dtype=np.int64
+                ):
+                    if int(env_i) in self.history:
+                        self.solve_step_by_env[(solve_idx, int(env_i))] = int(
+                            self._world_step
+                        )
+
+        self._world_step += 1
+        return action
+
+
+def _close_world(world):
+    try:
+        world.envs.close()
+    except Exception:
+        try:
+            world.close()
+        except Exception:
+            pass
+
+
+def _run_closed_loop_recording(
+    cfg,
+    dataset,
+    process,
+    policy_name,
+    label,
+    eval_episodes,
+    eval_start,
+    record_indices,
+):
+    device = torch.device(str(cfg.solver.device))
+    model = swm.policy.AutoCostModel(str(policy_name)).to(device).eval()
+    model.requires_grad_(False)
+    model.interpolate_pos_encoding = True
+
+    solver = CrossTraceCEMSolver(
+        model=model,
+        batch_size=int(cfg.solver.batch_size),
+        num_samples=int(cfg.solver.num_samples),
+        var_scale=float(cfg.solver.var_scale),
+        n_steps=int(cfg.solver.n_steps),
+        topk=int(cfg.solver.topk),
+        device=str(cfg.solver.device),
+        seed=int(cfg.seed),
+        state_scaler=process.get("state"),
+    )
+    world = swm.World(**cfg.world, image_shape=(224, 224))
+    plan_config = swm.PlanConfig(**cfg.plan_config)
+    transform = {"pixels": img_transform(cfg), "goal": img_transform(cfg)}
+    policy = RecordingWorldModelPolicy(
+        solver=solver,
+        config=plan_config,
+        process=process,
+        transform=transform,
+        record_indices=record_indices,
+    )
+    world.set_policy(policy)
+
+    print(f"===== CLOSED LOOP [{label}] =====")
+    t0 = time.time()
+    metrics = world.evaluate_from_dataset(
+        dataset,
+        start_steps=eval_start.tolist(),
+        goal_offset_steps=int(cfg.eval.goal_offset_steps),
+        eval_budget=int(cfg.eval.eval_budget),
+        episodes_idx=eval_episodes.tolist(),
+        callables=OmegaConf.to_container(
+            cfg.eval.get("callables"), resolve=True
+        ),
+    )
+    elapsed = time.time() - t0
+    success = np.asarray(metrics["episode_successes"], dtype=bool)
+    print(
+        f"[{label}] success={float(metrics['success_rate']):.1f}% "
+        f"failures={int((~success).sum())} solver_calls={len(solver.trace)} "
+        f"time={elapsed:.1f}s"
+    )
+    _close_world(world)
+    return {
+        "label": label,
+        "policy": str(policy_name),
+        "model": model,
+        "solver": solver,
+        "recorder": policy,
+        "metrics": metrics,
+        "success": success,
+        "elapsed": elapsed,
+    }
+
+
+def _record_map(recorder, env_i):
+    return {
+        int(r["world_step"]): r
+        for r in recorder.history.get(int(env_i), [])
+    }
+
+
+def _build_recorded_solve1_history(
+    recorder,
+    env_i,
+    solve_idx,
+    exact_current_px,
+    transform,
+    action_block,
+    max_context,
+):
+    key = (int(solve_idx), int(env_i))
+    if key not in recorder.solve_step_by_env:
+        raise RuntimeError(
+            f"Missing recorded solve step for solve={solve_idx}, env={env_i}"
+        )
+    step = int(recorder.solve_step_by_env[key])
+    rec = _record_map(recorder, env_i)
+    if step not in rec:
+        raise RuntimeError(
+            f"Missing current closed-loop record at step={step}, env={env_i}"
+        )
+
+    histories = {
+        1: {
+            "px": exact_current_px[-1:].clone(),
+            "past_raw": np.empty((0, 2), dtype=np.float32),
+        }
+    }
+    for ctx in range(2, int(max_context) + 1):
+        need = (ctx - 1) * int(action_block)
+        frame_steps = [
+            step - j * int(action_block)
+            for j in range(ctx - 1, 0, -1)
+        ]
+        if any(s not in rec for s in frame_steps):
+            histories[ctx] = None
+            continue
+        prior_images = [rec[s]["pixels"] for s in frame_steps]
+        prior_px = _transform_batch(transform, prior_images)
+        px = torch.cat(
+            [prior_px, exact_current_px[-1:].cpu()], dim=0
+        )
+        action_steps = list(range(step - need, step))
+        if any(s not in rec for s in action_steps):
+            histories[ctx] = None
+            continue
+        past_raw = np.asarray(
+            [rec[s]["action"] for s in action_steps],
+            dtype=np.float32,
+        )
+        histories[ctx] = {"px": px, "past_raw": past_raw}
+    return histories
 
 
 def _read_reference_manifest(path: Path):
