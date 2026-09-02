@@ -412,6 +412,8 @@ def run(cfg: DictConfig):
         "replay_iterations", [0, 3, 9]
     )))
     model_batch = int(mcfg.get("model_batch_size", 64))
+    replay_state_tol_px = float(mcfg.get("replay_state_tol_px", 1.0))
+    replay_state_tol_deg = float(mcfg.get("replay_state_tol_deg", 1.0))
     reference_manifest = str(mcfg.get("reference_manifest", "")).strip()
     manual_indices = list(map(int, mcfg.get("eval_indices", [])))
 
@@ -577,16 +579,30 @@ def run(cfg: DictConfig):
                     theta_err = float(_angle_error_rad(
                         replay["final_state"][4], recorded_next[4]
                     ))
-                    if pos_err > 1e-3 or theta_err > 1e-5:
+                    theta_err_deg = float(np.degrees(theta_err))
+                    replay_close = bool(
+                        pos_err <= replay_state_tol_px
+                        and theta_err_deg <= replay_state_tol_deg
+                    )
+                    if not replay_close:
                         raise RuntimeError(
-                            "Mean-plan replay does not reproduce solve-1 state: "
+                            "Mean-plan replay is not sufficiently close to "
+                            "recorded solve-1 state: "
                             f"env={env_i} source={source_label} "
-                            f"pos_max={pos_err:.6g} theta={theta_err:.6g}"
+                            f"pos_max_px={pos_err:.6g} "
+                            f"theta_deg={theta_err_deg:.6g} "
+                            f"tol=({replay_state_tol_px}px,"
+                            f"{replay_state_tol_deg}deg). "
+                            "PushT observation state is not a complete physics "
+                            "snapshot, so bitwise replay is not expected; this "
+                            "guard only rejects materially different replays."
                         )
                 else:
                     recorded_next = None
                     pos_err = float("nan")
                     theta_err = float("nan")
+                    theta_err_deg = float("nan")
+                    replay_close = False
 
                 start_cost = float(_physical_cost(
                     np.asarray(tr0["solve_start_states"][li0])[None], goal
@@ -640,6 +656,8 @@ def run(cfg: DictConfig):
                         "physical_progress": start_cost - final_cost,
                         "next_state_replay_pos_max_abs": pos_err,
                         "next_state_replay_theta_abs_rad": theta_err,
+                        "next_state_replay_theta_abs_deg": theta_err_deg,
+                        "next_state_replay_within_tolerance": replay_close,
                         "pred_endpoint_mse": float(
                             torch.mean((zp - zr) ** 2).cpu()
                         ),
@@ -1091,6 +1109,8 @@ def run(cfg: DictConfig):
             "contexts": contexts,
             "replay_iterations": replay_iterations,
             "action_block": action_block,
+            "replay_state_tol_px": replay_state_tol_px,
+            "replay_state_tol_deg": replay_state_tol_deg,
             "lewm_policy": lewm_policy,
             "ald_tf_policy": ald_policy,
             "cem_modified": False,
@@ -1125,8 +1145,11 @@ def run(cfg: DictConfig):
                 "history, short-prefix predictor drift is directly implicated."
             ),
             "mean_plan_chain": (
-                "next_state replay audit proves the executed CEM mean produces "
-                "the recorded next solve state; physical_progress then links "
+                "next_state replay audit requires the executed CEM mean to "
+                "reproduce the recorded next solve state within a small physical "
+                "tolerance. PushT's 7D observation is not a complete simulator "
+                "snapshot (e.g. block velocity/contact state are omitted), so "
+                "bitwise replay is not expected. physical_progress then links "
                 "first-solve model choice to the next planning basin."
             ),
         },
