@@ -599,7 +599,13 @@ def run(cfg: DictConfig):
         if it < 0 or it >= int(cfg.solver.n_steps):
             raise ValueError(f"Invalid replay iteration {it}")
 
-    cfg.world.max_episode_steps = 2 * int(cfg.eval.eval_budget)
+    # stable-worldmodel==0.0.6 requires the environment horizon to cover
+    # both the closed-loop evaluation budget and the dataset goal offset.
+    # This matters for smoke tests where eval_budget may be intentionally tiny.
+    cfg.world.max_episode_steps = max(
+        2 * int(cfg.eval.eval_budget),
+        int(cfg.eval.goal_offset_steps) + 1,
+    )
     world = swm.World(**cfg.world, image_shape=(224, 224))
     dataset = get_dataset(cfg, cfg.eval.dataset_name)
     col, eval_rows, eval_episodes, eval_start = _prepare_eval_rows(cfg, dataset)
