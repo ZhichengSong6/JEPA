@@ -20,15 +20,14 @@ iteration, this diagnostic measures on the SAME candidate population:
 
 3) Causal-prefix fidelity:
    Re-score every candidate with C in {1,2,3} real observed coarse frames.
-   Solve 1 uses the ACTUAL preceding closed-loop trajectory reconstructed by
-   replaying the exact CEM mean plan returned by solve 0. Solve 0 uses dataset
-   pre-history only when it exists; unavailable prefixes are reported, never
-   fabricated.
+   Solve 1 uses observations/actions recorded directly from the ACTUAL official
+   closed-loop run. Solve 0 uses dataset pre-history only when it exists;
+   unavailable prefixes are reported, never fabricated.
 
 4) Mean-plan causal chain:
-   Replay the exact solve-0 CEM mean that was executed for 25 raw steps,
-   verify it reaches the recorded solve-1 state, and compare its predicted
-   endpoint with the real encoded endpoint.
+   Compare the official policy's actually returned 25 raw actions directly
+   against the solve-0 final CEM mean, then use the directly recorded solve-1
+   state/image for physical progress and endpoint-fidelity analysis.
 
 The physical simulator is diagnosis-only and never changes planning.
 
