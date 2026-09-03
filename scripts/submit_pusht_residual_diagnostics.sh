@@ -90,7 +90,7 @@ python -u eval_pusht_diagnostic_b_case93.py \
   +diagnostic.solve=1 \
   +diagnostic.source=ald_tf \
   +diagnostic.mode=formal \
-  "+diagnostic.designs=300x5,900x5,300x7,300x10" \
+  "+diagnostic.designs='300x5,900x5,300x7,300x10'" \
   +diagnostic.restarts=4 \
   +diagnostic.n_steps=30 \
   +diagnostic.replay_iterations='[0,3,9,19,29]' \
