@@ -1,0 +1,53 @@
+eval_index,case_type,source,solve,world_step,initial_physical_cost,mean_replay_physical_cost,executed_action_max_abs_error,actual_next_physical_cost,mean_replay_vs_actual_pusher_px,mean_replay_vs_actual_block_px,mean_replay_vs_actual_theta_deg,actual_endpoint_available,audit_unavailable_reason
+7,both_fail,lewm,0,0,83.1680987115868,15.940972608329401,0.0,15.940972608329401,0.0,0.0,0.0,True,
+7,both_fail,lewm,1,25,15.940972608329401,25.073541801904952,,,,,,False,No next active solve boundary; a full plan may not have executed
+7,both_fail,ald_tf,0,0,83.1680987115868,6.861287931094613,0.0,6.861287931094613,0.0,0.0,0.0,True,
+7,both_fail,ald_tf,1,25,6.861287931094613,7.5182732329255115,,,,,,False,No next active solve boundary; a full plan may not have executed
+11,lewm_fail_ald_success,lewm,0,0,105.38221550262455,27.20379710777373,0.0,27.20379710777373,0.0,0.0,0.0,True,
+11,lewm_fail_ald_success,lewm,1,25,27.20379710777373,10.810082620649794,,,,,,False,No next active solve boundary; a full plan may not have executed
+11,lewm_fail_ald_success,ald_tf,0,0,105.38221550262455,0.3791184725143476,0.0,0.3791184725143476,0.0,0.0,0.0,True,
+11,lewm_fail_ald_success,ald_tf,1,25,0.3791184725143476,0.4642524066145343,,,,,,False,No next active solve boundary; a full plan may not have executed
+20,lewm_fail_ald_success,lewm,0,0,222.121334023391,3.9087607747699953,0.0,3.9087607747699953,0.0,0.0,0.0,True,
+20,lewm_fail_ald_success,lewm,1,25,3.9087607747699953,2.502887827231927,,,,,,False,No next active solve boundary; a full plan may not have executed
+20,lewm_fail_ald_success,ald_tf,0,0,222.121334023391,0.6311860067887292,0.0,0.6311860067887292,0.0,0.0,0.0,True,
+20,lewm_fail_ald_success,ald_tf,1,25,0.6311860067887292,0.9246423629455318,,,,,,False,No next active solve boundary; a full plan may not have executed
+24,lewm_fail_ald_success,lewm,0,0,60.613467025821016,2.4124439724826625,0.0,2.4124439724826625,0.0,0.0,0.0,True,
+24,lewm_fail_ald_success,lewm,1,25,2.4124439724826625,3.9324470092874173,,,,,,False,No next active solve boundary; a full plan may not have executed
+24,lewm_fail_ald_success,ald_tf,0,0,60.613467025821016,0.4536635672410423,0.0,0.4536635672410423,0.0,0.0,0.0,True,
+24,lewm_fail_ald_success,ald_tf,1,25,0.4536635672410423,0.5006470560743801,,,,,,False,No next active solve boundary; a full plan may not have executed
+27,both_fail,lewm,0,0,55.78034414891681,91.82404095230771,0.0,91.82404095230771,0.0,0.0,0.0,True,
+27,both_fail,lewm,1,25,91.82404095230771,88.58761595543405,,,,,,False,No next active solve boundary; a full plan may not have executed
+27,both_fail,ald_tf,0,0,55.78034414891681,17.575268418898,0.0,17.575268418898,0.0,0.0,0.0,True,
+27,both_fail,ald_tf,1,25,17.575268418898,220.02848897209387,,,,,,False,No next active solve boundary; a full plan may not have executed
+51,both_success,lewm,0,0,230.1859950818746,0.027821303037188834,0.0,0.027821303037188834,0.0,0.0,0.0,True,
+51,both_success,lewm,1,25,0.027821303037188834,0.2025369898340314,,,,,,False,No next active solve boundary; a full plan may not have executed
+51,both_success,ald_tf,0,0,230.1859950818746,0.00809987402811477,0.0,0.00809987402811477,0.0,0.0,0.0,True,
+51,both_success,ald_tf,1,25,0.00809987402811477,0.9959220130003683,,,,,,False,No next active solve boundary; a full plan may not have executed
+53,both_fail,lewm,0,0,36.62859728442244,27.371966692311243,0.0,27.679623050891372,0.0,0.9463604378344456,0.909036874377279,True,
+53,both_fail,lewm,1,25,27.679623050891372,26.63344557630414,,,,,,False,No next active solve boundary; a full plan may not have executed
+53,both_fail,ald_tf,0,0,36.62859728442244,24.11948817603188,0.0,24.11948817603188,0.0,0.0,0.0,True,
+53,both_fail,ald_tf,1,25,24.11948817603188,31.955417646303914,,,,,,False,No next active solve boundary; a full plan may not have executed
+60,both_success,lewm,0,0,102.02411482866945,0.18531952837374394,0.0,0.18531952837374394,0.0,0.0,0.0,True,
+60,both_success,lewm,1,25,0.18531952837374394,0.033537241039490746,,,,,,False,No next active solve boundary; a full plan may not have executed
+60,both_success,ald_tf,0,0,102.02411482866945,0.4834458916155019,0.0,0.48590934216019893,0.0,0.68133319373827,0.7219177910186596,True,
+60,both_success,ald_tf,1,25,0.48590934216019893,0.04667605449916311,,,,,,False,No next active solve boundary; a full plan may not have executed
+62,lewm_fail_ald_success,lewm,0,0,18.218238470663927,2.3173897762056854,0.0,2.3173897762056854,0.0,0.0,0.0,True,
+62,lewm_fail_ald_success,lewm,1,25,2.3173897762056854,5.583994295044192,,,,,,False,No next active solve boundary; a full plan may not have executed
+62,lewm_fail_ald_success,ald_tf,0,0,18.218238470663927,0.06298125810559106,0.0,0.06658183896703233,0.0,0.19685503770030421,0.13667484911181962,True,
+62,lewm_fail_ald_success,ald_tf,1,25,0.06658183896703233,0.13683105139375662,,,,,,False,No next active solve boundary; a full plan may not have executed
+77,lewm_success_ald_fail,lewm,0,0,39.527327039499085,0.0877702338715681,0.0,0.0877702338715681,0.0,0.0,0.0,True,
+77,lewm_success_ald_fail,lewm,1,25,0.0877702338715681,0.24131554275423953,,,,,,False,No next active solve boundary; a full plan may not have executed
+77,lewm_success_ald_fail,ald_tf,0,0,39.527327039499085,5.372468665076134,0.0,5.372468665076134,0.0,0.0,0.0,True,
+77,lewm_success_ald_fail,ald_tf,1,25,5.372468665076134,2.67581893634553,,,,,,False,No next active solve boundary; a full plan may not have executed
+92,lewm_fail_ald_success,lewm,0,0,292.4362779637794,1.672322806578809,0.0,1.6606444894328152,0.0,0.17306559376519975,0.09997518820484176,True,
+92,lewm_fail_ald_success,lewm,1,25,1.6606444894328152,3.5572747290713584,,,,,,False,No next active solve boundary; a full plan may not have executed
+92,lewm_fail_ald_success,ald_tf,0,0,292.4362779637794,1.334442754644414,0.0,1.334442754644414,0.0,0.0,0.0,True,
+92,lewm_fail_ald_success,ald_tf,1,25,1.334442754644414,2.861082680445415,,,,,,False,No next active solve boundary; a full plan may not have executed
+93,both_fail,lewm,0,0,18.77273281221102,4.561495972380257,0.0,4.549740881618975,0.0,0.09253032224701221,0.05389314929535992,True,
+93,both_fail,lewm,1,25,4.549740881618975,1.5851490741236869,,,,,,False,No next active solve boundary; a full plan may not have executed
+93,both_fail,ald_tf,0,0,18.77273281221102,1.5604804754150439,0.0,1.5604804754150439,0.0,0.0,0.0,True,
+93,both_fail,ald_tf,1,25,1.5604804754150439,1.39008714230144,,,,,,False,No next active solve boundary; a full plan may not have executed
+99,both_success,lewm,0,0,83.18601904407137,0.5615426427121718,0.0,0.5615426427121718,0.0,0.0,0.0,True,
+99,both_success,lewm,1,25,0.5615426427121718,1.4941277983991796,,,,,,False,No next active solve boundary; a full plan may not have executed
+99,both_success,ald_tf,0,0,83.18601904407137,0.23515938478363194,0.0,0.2348394516241867,0.0,0.01481826249577576,0.021497435161998726,True,
+99,both_success,ald_tf,1,25,0.2348394516241867,0.36456580312511666,,,,,,False,No next active solve boundary; a full plan may not have executed

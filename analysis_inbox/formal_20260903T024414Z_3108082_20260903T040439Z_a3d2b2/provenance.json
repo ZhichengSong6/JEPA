@@ -1,0 +1,9 @@
+{
+  "git_commit": "2dfccf80e452d1de3f0ad8648d7879948e01df44",
+  "git_status": "?? ald_minimal_ablation_bundle.tar.gz\n?? bias_only_formal_bundle.tar.gz\n?? bn_restore_eval.log\n?? cleanup_inventory/\n?? environment_v10.json\n?? environment_v11.json\n?? environment_v12.json\n?? environment_v13.json\n?? environment_v14.json\n?? environment_v15.json\n?? environment_v16.json\n?? environment_v17.json\n?? environment_v18.json\n?? environment_v19.json\n?? eval_stage2_predproj_bn_restore.py\n?? jepa_next_analysis_bundle.tar.gz\n?? lowbudget_cem_results.tar.gz\n?? multiscale_diagnostics_formal_bundle.tar.gz\n?? official_replay_diagnostics_bundle.tar.gz\n?? planner_diagnostics_formal_bundle.tar.gz\n?? pure_ald_formal_bundle.tar.gz\n?? requirements_frozen_v10.txt\n?? requirements_frozen_v11.txt\n?? requirements_frozen_v12.txt\n?? requirements_frozen_v13.txt\n?? requirements_frozen_v14.txt\n?? requirements_frozen_v15.txt\n?? requirements_frozen_v16.txt\n?? requirements_frozen_v17.txt\n?? requirements_frozen_v18.txt\n?? requirements_frozen_v19.txt\n",
+  "packages": {
+    "torch": "2.13.0+cu126",
+    "stable-worldmodel": "0.0.6",
+    "stable-pretraining": "0.1.6"
+  }
+}

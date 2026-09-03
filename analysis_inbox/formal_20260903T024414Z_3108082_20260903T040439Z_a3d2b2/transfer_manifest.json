@@ -1,0 +1,212 @@
+{
+  "source_run": "formal_20260903T024414Z_3108082",
+  "mode": "formal",
+  "official_benchmark": true,
+  "protocol": {
+    "num_samples": 300,
+    "n_steps": 30,
+    "topk": 30,
+    "batch_size": 1,
+    "var_scale": 1.0,
+    "history_size": 1,
+    "frame_skip": 1,
+    "env_name": "swm/PushT-v1",
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "num_eval": 100,
+    "eval_budget": 50,
+    "goal_offset_steps": 25,
+    "img_size": 224,
+    "dataset_name": "pusht_expert_train",
+    "seed": 42,
+    "replay_iterations": [
+      0,
+      3,
+      9,
+      19,
+      29
+    ]
+  },
+  "paired_counts": {
+    "both_success": 90,
+    "lewm_fail_ald_success": 5,
+    "both_fail": 4,
+    "lewm_success_ald_fail": 1
+  },
+  "population_count": 260,
+  "created_utc": "2026-09-03T04:04:39.316308+00:00",
+  "transfer": "UTF-8 reports only; concatenate parts in order to recover each original file",
+  "cleanup": "Remove this temporary directory after analysis; ordinary Git deletion retains history",
+  "excluded": [
+    "recordings/*.pt",
+    "populations/*.npz",
+    "checkpoints",
+    "datasets",
+    "videos"
+  ],
+  "files": [
+    {
+      "source_name": "summary.json",
+      "bytes": 2713,
+      "sha256": "305a21d51aa5ec7a55c1cf140df52749b088283cc46740d1767dd6c26c6b2594",
+      "parts": [
+        {
+          "path": "summary.json",
+          "bytes": 2713,
+          "sha256": "305a21d51aa5ec7a55c1cf140df52749b088283cc46740d1767dd6c26c6b2594"
+        }
+      ]
+    },
+    {
+      "source_name": "paired_summary.json",
+      "bytes": 563,
+      "sha256": "724fd038a35583273be3d8b1303cc002b51a475d99ab1db9f39fbfd3cb86e2bc",
+      "parts": [
+        {
+          "path": "paired_summary.json",
+          "bytes": 563,
+          "sha256": "724fd038a35583273be3d8b1303cc002b51a475d99ab1db9f39fbfd3cb86e2bc"
+        }
+      ]
+    },
+    {
+      "source_name": "paired_manifest.csv",
+      "bytes": 5672,
+      "sha256": "690168b2c277e214c8f7c821afe63c308bc830e7bf319da8ee0bbb8453ab7f00",
+      "parts": [
+        {
+          "path": "paired_manifest.csv",
+          "bytes": 5672,
+          "sha256": "690168b2c277e214c8f7c821afe63c308bc830e7bf319da8ee0bbb8453ab7f00"
+        }
+      ]
+    },
+    {
+      "source_name": "lewm_closed_loop.json",
+      "bytes": 2398,
+      "sha256": "0ab6cba121d6d62816f55ed8b4e0299937dfce33879a2a70bb0b1016bcad13cb",
+      "parts": [
+        {
+          "path": "lewm_closed_loop.json",
+          "bytes": 2398,
+          "sha256": "0ab6cba121d6d62816f55ed8b4e0299937dfce33879a2a70bb0b1016bcad13cb"
+        }
+      ]
+    },
+    {
+      "source_name": "ald_tf_closed_loop.json",
+      "bytes": 2439,
+      "sha256": "00ce9c4e7840fce1dd0096249687391a005f8199aaef79453e311a8cf64528e9",
+      "parts": [
+        {
+          "path": "ald_tf_closed_loop.json",
+          "bytes": 2439,
+          "sha256": "00ce9c4e7840fce1dd0096249687391a005f8199aaef79453e311a8cf64528e9"
+        }
+      ]
+    },
+    {
+      "source_name": "cem_parity.json",
+      "bytes": 292,
+      "sha256": "9e75d85f793c3a5dec12f4ec0a8f3e8a78a5acd9f795707f88570ce71feb7bcb",
+      "parts": [
+        {
+          "path": "cem_parity.json",
+          "bytes": 292,
+          "sha256": "9e75d85f793c3a5dec12f4ec0a8f3e8a78a5acd9f795707f88570ce71feb7bcb"
+        }
+      ]
+    },
+    {
+      "source_name": "config.yaml",
+      "bytes": 1238,
+      "sha256": "67243d9815ce1c719927f2d386b1dbaa8b735800d5746fa129bcb64ee7ee4ed4",
+      "parts": [
+        {
+          "path": "config.yaml",
+          "bytes": 1238,
+          "sha256": "67243d9815ce1c719927f2d386b1dbaa8b735800d5746fa129bcb64ee7ee4ed4"
+        }
+      ]
+    },
+    {
+      "source_name": "run_identity.json",
+      "bytes": 3813,
+      "sha256": "1b0aa388e45e307726049d0bbbeab25fbc7f53bfcf13af765fed816265439048",
+      "parts": [
+        {
+          "path": "run_identity.json",
+          "bytes": 3813,
+          "sha256": "1b0aa388e45e307726049d0bbbeab25fbc7f53bfcf13af765fed816265439048"
+        }
+      ]
+    },
+    {
+      "source_name": "provenance.json",
+      "bytes": 1174,
+      "sha256": "a7b5b729d1a0e5aa3c4cd2b27269eb972f77cbcea17a7953fb1fbbf11d24511e",
+      "parts": [
+        {
+          "path": "provenance.json",
+          "bytes": 1174,
+          "sha256": "a7b5b729d1a0e5aa3c4cd2b27269eb972f77cbcea17a7953fb1fbbf11d24511e"
+        }
+      ]
+    },
+    {
+      "source_name": "population_metrics.csv",
+      "bytes": 1505646,
+      "sha256": "d2d3fed1d7870d6a202509cdcfad83ab2b8acf80db7e2b88e866505fd8ec5af4",
+      "parts": [
+        {
+          "path": "population_metrics.csv.part001.txt",
+          "bytes": 1048576,
+          "sha256": "6b209c70b15c8b2a14f523b0c6734c0d45e8a8a56a3fcce0e4685dc53ef3c2ec"
+        },
+        {
+          "path": "population_metrics.csv.part002.txt",
+          "bytes": 457070,
+          "sha256": "69d1044a92a5bd801153622888ea18d9567c7914778cb1e2df5e7f2191e2f67f"
+        }
+      ]
+    },
+    {
+      "source_name": "case_metrics.csv",
+      "bytes": 334164,
+      "sha256": "23d529b228499526e8ab6f245076b02dc4012f04fc8a60536d19eea86d0ebd90",
+      "parts": [
+        {
+          "path": "case_metrics.csv",
+          "bytes": 334164,
+          "sha256": "23d529b228499526e8ab6f245076b02dc4012f04fc8a60536d19eea86d0ebd90"
+        }
+      ]
+    },
+    {
+      "source_name": "mean_execution_audit.csv",
+      "bytes": 7058,
+      "sha256": "ea1bf9870252d13f5c0d49a6f72b86292f7f4609ec10147e353ff89be227b182",
+      "parts": [
+        {
+          "path": "mean_execution_audit.csv",
+          "bytes": 7058,
+          "sha256": "ea1bf9870252d13f5c0d49a6f72b86292f7f4609ec10147e353ff89be227b182"
+        }
+      ]
+    },
+    {
+      "source_name": "skipped_solves.json",
+      "bytes": 3,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "parts": [
+        {
+          "path": "skipped_solves.json",
+          "bytes": 3,
+          "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+        }
+      ]
+    }
+  ],
+  "total_report_bytes": 1867173
+}
