@@ -18,6 +18,7 @@ wandb/
 *.gif
 
 # Analysis / transfer artifacts (keep git code-only)
+artifacts/
 analysis_inbox/
 docs/results/
 *.tar.gz
