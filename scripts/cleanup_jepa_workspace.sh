@@ -51,7 +51,7 @@ for d in "$DATA"/*; do
     continue
   fi
 
-  if find "$d" -maxdepth 3 -type f \(       -name '*_object.ckpt' -o -name '*.pt' -o -name '*.pth'     \) -print -quit | grep -q .; then
+  if find "$d" -maxdepth 3 -type f \(       -name '*.ckpt' -o -name '*.pt' -o -name '*.pth'     \) -print -quit | grep -q .; then
     echo "KEEP model dir: $d"
 
     mapfile -t objs < <(
