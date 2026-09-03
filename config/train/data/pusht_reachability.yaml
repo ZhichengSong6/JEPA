@@ -1,0 +1,15 @@
+dataset:
+  # Six coarse observations at frameskip=5 span the official 25 raw-step
+  # planning horizon: t, t+5, ..., t+25.
+  num_steps: ${eval:'${reachability.goal_offset_coarse} + 1'}
+  frameskip: 5
+  name: pusht_expert_train
+  keys_to_load:
+    - pixels
+    - action
+    - proprio
+    - state
+  keys_to_cache:
+    - action
+    - proprio
+    - state
