@@ -20,6 +20,31 @@ from eval_b3000_critical_jepa_mechanism import _find_trace_for_env,_record_map
 from eval_b3000_hardstate_encoder_geometry import _component_costs,_selection_metrics
 from eval_pusht_official_diagnostic import load_recording,replay,write_csv,write_json
 
+class ChunkedCostModel:
+    """Memory-safe, numerically equivalent candidate scoring wrapper.
+
+    CEM still samples the full population and performs one global top-k update.
+    Only model.get_cost evaluation is split along the candidate dimension.
+    """
+    def __init__(self,model,chunk_size=100):
+        self.model=model
+        self.chunk_size=int(chunk_size)
+
+    @torch.inference_mode()
+    def get_cost(self,info,candidates):
+        n=int(candidates.shape[1]); out=[]
+        for st in range(0,n,self.chunk_size):
+            en=min(st+self.chunk_size,n); chunk_info={}
+            for k,v in info.items():
+                if torch.is_tensor(v) and v.ndim>=2 and v.shape[1]==n:
+                    chunk_info[k]=v[:,st:en]
+                elif isinstance(v,np.ndarray) and v.ndim>=2 and v.shape[1]==n:
+                    chunk_info[k]=v[:,st:en]
+                else:
+                    chunk_info[k]=v
+            out.append(self.model.get_cost(chunk_info,candidates[:,st:en]))
+        return torch.cat(out,dim=1)
+
 def parse_designs(x):
     items=[s.strip() for s in (x.split(",") if isinstance(x,str) else x) if str(s).strip()]; out=[]
     for item in items:
@@ -48,6 +73,8 @@ def run(cfg:DictConfig):
     defaults=("300x5,900x5,300x7,300x10",4,30,[0,3,9,19,29],30) if mode=="formal" else ("30x5",1,2,[0,1],3)
     designs=parse_designs(dc.get("designs",defaults[0])); restarts=int(dc.get("restarts",defaults[1])); n_steps=int(dc.get("n_steps",defaults[2]))
     replay_iters=[int(x) for x in dc.get("replay_iterations",defaults[3])]; topk_fixed=int(dc.get("topk",defaults[4])); base_seed=int(dc.get("base_seed",42))
+    candidate_chunk=int(dc.get("candidate_chunk",100))
+    if candidate_chunk<=0: raise ValueError("diagnostic.candidate_chunk must be positive")
     identity=json.loads((run_dir/"run_identity.json").read_text()); p=identity["protocol"]; device=torch.device(str(cfg.solver.device))
     source=load_recording(run_dir/"recordings"/f"{source_label}.pt",device); model=source["model"]
     dataset=get_dataset(cfg,str(p["dataset_name"])); process=_build_process(cfg,dataset)
@@ -75,7 +102,8 @@ def run(cfg:DictConfig):
         if it<tr["candidates"].shape[1]: score("recorded_official",-1,int(tr["candidates"].shape[3]),it,tr["candidates"][li,it],tr["predicted_costs"][li,it])
       for di,(n,h) in enumerate(designs):
        for r in range(restarts):
-        topk=min(topk_fixed,n); solver=CrossTraceCEMSolver(model=model,batch_size=1,num_samples=n,var_scale=float(p.get("var_scale",1.0)),
+        topk=min(topk_fixed,n); scoring_model=ChunkedCostModel(model,candidate_chunk)
+        solver=CrossTraceCEMSolver(model=scoring_model,batch_size=1,num_samples=n,var_scale=float(p.get("var_scale",1.0)),
           n_steps=n_steps,topk=topk,device=str(cfg.solver.device),seed=base_seed+1000*di+r,state_scaler=process.get("state"))
         plan=swm.PlanConfig(horizon=h,receding_horizon=h,action_block=action_block)
         solver.configure(action_space=Box(-1.,1.,shape=(h,2),dtype=np.float32),n_envs=1,config=plan)
@@ -87,6 +115,8 @@ def run(cfg:DictConfig):
         mean_rows.append(dict(design=f"{n}x{h}",restart=r,mean_ever_success=bool(mh[0]),mean_endpoint_success=bool(mend[0]),
           mean_physical_cost=float(_component_costs(mf,goal)["official_cost"][0]),mean_contact_steps=int(mc[0]),
           mean_block_motion_px=float(np.linalg.norm(mf[0,2:4]-start[2:4]))))
+        del solver,scoring_model
+        if torch.cuda.is_available(): torch.cuda.empty_cache()
     finally: env.close()
     summary=summarize(rows); recorded=[r for r in rows if r["design"]=="recorded_official"]
     recmax=max([r["ever_success_fraction"] for r in recorded] or [0.]); base=next((r for r in summary if r["design"]=="300x5"),None)
@@ -96,7 +126,8 @@ def run(cfg:DictConfig):
     flags=dict(restart_or_basin=(bmax>recmax+eps),sample_budget=(nmax>bmax+eps),longer_horizon=(hmax>bmax+eps))
     write_csv(out/"coverage_rows.csv",rows); write_csv(out/"design_summary.csv",summary); write_csv(out/"mean_plan_rows.csv",mean_rows)
     write_json(out/"diagnosis.json",dict(status="complete",case=case,source=source_label,solve=solve,designs=[f"{n}x{h}" for n,h in designs],
-      restarts=restarts,n_steps=n_steps,replay_iterations=replay_iters,recorded_max_success_fraction=recmax,rerun_300x5_max=bmax,
+      restarts=restarts,n_steps=n_steps,replay_iterations=replay_iters,candidate_chunk=candidate_chunk,
+      recorded_max_success_fraction=recmax,rerun_300x5_max=bmax,
       rerun_900x5_max=nmax,rerun_long_horizon_max=hmax,material_change_threshold=eps,flags=flags,
       interpretation="300x5 restart helps => local basin/random coverage; 900x5 helps => sample budget; longer horizon helps => horizon; none helps => test action parameterization/reachability next."))
     print(f"=== DIAGNOSTIC B DONE ===\nResults: {out}",flush=True)
