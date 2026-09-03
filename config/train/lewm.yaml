@@ -135,3 +135,26 @@ factor:
     pusher: 1.0
     block: 1.0
     theta: 1.0
+
+
+# Reachability-Raw: shape the actual raw Euclidean latent cost used by CEM.
+# No physical state/factor/reward supervision is used.
+reachability:
+  enabled: False
+
+  # PushT training data uses frameskip=5. goal_offset_coarse=5 therefore
+  # corresponds to the official planner's 25 raw-step horizon.
+  goal_offset_coarse: 5
+
+  # Compare all pre-goal state pairs i<j whose coarse temporal separation is
+  # within [min_pair_gap, max_pair_gap]. With goal index 5, max=4 covers
+  # 5/10/15/20 raw-step ordering differences while sharing the same t+25 goal.
+  min_pair_gap: 1
+  max_pair_gap: 4
+
+  # One scale-normalized soft ranking loss:
+  # softplus((C_later-C_earlier + margin)/temperature).
+  weight: 0.05
+  margin_fraction: 0.02
+  temperature_fraction: 0.10
+  scale_eps: 1.0e-6
