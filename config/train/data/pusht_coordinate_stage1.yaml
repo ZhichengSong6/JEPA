@@ -1,0 +1,13 @@
+# Offline sequence for coordinate-geometry Stage-I.
+# No privileged simulator state is loaded.
+dataset:
+  num_steps: ${eval:'${wm.history_size} + ${coord.rollout_horizon}'}
+  frameskip: 5
+  name: pusht_expert_train
+  keys_to_load:
+    - pixels
+    - action
+    - proprio
+  keys_to_cache:
+    - action
+    - proprio
