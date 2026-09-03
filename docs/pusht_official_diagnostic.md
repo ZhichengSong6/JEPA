@@ -118,3 +118,29 @@ bash scripts/submit_pusht_official_diagnostic.sh formal
 
 This redoes the offline diagnostic using saved runs; it does not rerun CEM or
 change case labels. Completed results are not overwritten.
+
+## Upload results through GitHub when the bundle is too large
+
+```bash
+python scripts/upload_pusht_analysis.py
+```
+
+The uploader automatically selects the newest completed formal run, or the
+newest complete smoke if there is no formal result. To choose a particular run,
+pass the original run directory as its positional argument. No experiment is
+rerun and no GPU is needed. `--prepare-only` creates the compact copy locally.
+
+Only the 13 JSON/CSV/YAML reports are copied to `analysis_inbox/<unique-run-id>`
+on `agent/stage1-bias-calibration`. Large recordings and candidate arrays stay
+on the server. Reports larger than 1 MiB are split into UTF-8 text parts, with
+byte counts and SHA-256 hashes in `transfer_manifest.json`. Reassemble parts
+in manifest order before parsing CSV/JSON. These reports are sufficient for
+the first comparison of paired outcomes, Factor geometry, theta ranking and
+replay reliability; individual candidate arrays can be requested later if needed.
+
+The upload uses an isolated disposable worktree, existing GitHub push credentials
+and a normal fast-forward-only push. It does not stage current work, change the
+current branch, overwrite remote changes or delete source results. Send the
+printed GitHub link after `=== UPLOAD COMPLETE ===` appears. After analysis,
+remove only this run's temporary inbox directory. Normal deletion removes files
+from the branch's current contents; Git commit history retains them.
