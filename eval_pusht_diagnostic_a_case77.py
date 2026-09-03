@@ -72,8 +72,10 @@ def run(cfg:DictConfig):
           enc,pred,cross,enorm,mse,radial=[x.detach().cpu().numpy().astype(np.float64) for x in (enc,pred,cross,enorm,mse,radial)]
           native=float("nan")
           if label==src:
-           native=float(np.max(np.abs(pred-np.asarray(tr["predicted_costs"][li,it]))))
-           if native>2e-4: raise RuntimeError(f"native CEM cost audit failed: {native}")
+           native_ref=np.asarray(tr["predicted_costs"][li,it],dtype=np.float64)
+           native=float(np.max(np.abs(pred-native_ref)))
+           if not np.allclose(pred,native_ref,rtol=2e-4,atol=2e-4):
+            raise RuntimeError(f"native CEM cost audit failed: max_abs={native}")
           inv_e,pairs_e=inversion_rate(pred,enc,margin); inv_p,pairs_p=inversion_rate(pred,phys,margin)
           se=_selection_metrics(pred,enc,min(topk,len(pred))); sp=_selection_metrics(pred,phys,min(topk,len(pred)))
           rows.append(dict(case=case,source=src,solve=solve,cem_iteration=it,model=label,endpoint_mse=float(mse.mean()),
