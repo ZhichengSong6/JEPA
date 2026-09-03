@@ -496,12 +496,18 @@ def run(cfg):
     out = run_dir / f"{cfg.output_model_name}_object.ckpt"
     torch.save(teacher, out)
 
+    callback_metrics = {}
+    for key, value in trainer.callback_metrics.items():
+        if torch.is_tensor(value) and value.numel() == 1:
+            callback_metrics[str(key)] = float(value.detach().cpu())
+
     summary = {
         "status": "complete",
         "global_step": int(trainer.global_step),
         "output": str(out),
         "max_roundtrip_error": max_roundtrip_error,
         "adapter": adapter.diagnostics(),
+        "metrics": callback_metrics,
         "frozen_policy": str(cfg.coord.init_policy),
         "rollout_horizon": int(cfg.coord.rollout_horizon),
         "perturb_first_only": bool(cfg.coord.perturb_first_only),
