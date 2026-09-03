@@ -57,7 +57,32 @@ python -m py_compile \
   jepa.py \
   train_coordinate_stage1.py
 
-python -m pytest -q tests/test_coordinate_geometry.py
+python - <<'PY'
+import torch
+from coordinate_geometry import SPDCoordinateAdapter
+
+torch.manual_seed(0)
+
+adapter = SPDCoordinateAdapter(8)
+x = torch.randn(5, 8)
+assert torch.allclose(adapter(x), x, atol=1e-6, rtol=1e-6)
+
+with torch.no_grad():
+    adapter.log_metric_raw.normal_(mean=0.0, std=0.03)
+adapter.eval()
+adapter.refresh_cache()
+
+x = torch.randn(17, 8)
+recovered = adapter.inverse(adapter(x))
+err = float((recovered - x).abs().max())
+assert err < 2e-5, err
+
+A = adapter._fresh_matrix()
+eig = torch.linalg.eigvalsh(A.T @ A)
+assert bool(torch.all(eig > 0)), eig
+
+print(f"coordinate adapter sanity checks passed; max_roundtrip_error={err:.3e}")
+PY
 
 if [[ "$MODE" == "smoke" ]]; then
   rm -rf "$OUT_DIR"
