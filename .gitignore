@@ -17,27 +17,28 @@ wandb/
 *.mp4
 *.gif
 
+# Analysis / transfer artifacts (keep git code-only)
+analysis_inbox/
+docs/results/
+*.tar.gz
+*.tgz
+*.zip
+
 # Generated environment files
 environment.json
 requirements_frozen_v2.txt
+environment_v[2-9]*.json
+requirements_frozen_v[2-9]*.txt
 
-# Hydra
+# Hydra / experiment outputs
 outputs/
 multirun/
+
+# Generated Slurm files
+*.sbatch
+slurm/generated_*/
 
 # Editors / OS
 .vscode/
 .idea/
 .DS_Store
-
-# Shell scripts
-*.sh
-*.sbatch
-
-# Generated versioned environment dumps
-environment_v[2-9]*.json
-requirements_frozen_v[2-9]*.txt
-
-# Generated versioned environment dumps
-environment_v[2-9]*.json
-requirements_frozen_v[2-9]*.txt
