@@ -1,0 +1,80 @@
+defaults:
+  - _self_
+  - data: pusht_coordinate_stage1
+
+output_model_name: lewm_coordinate_stage1
+subdir: pusht_coordinate_stage1_seed3072
+seed: 3072
+train_split: 0.9
+img_size: 224
+
+wm:
+  history_size: 3
+  embed_dim: 192
+
+loader:
+  batch_size: 16
+  num_workers: 6
+  persistent_workers: true
+  prefetch_factor: 2
+  pin_memory: true
+
+val_loader:
+  batch_size: 16
+  num_workers: 4
+  persistent_workers: true
+  prefetch_factor: 2
+  pin_memory: true
+
+optimizer:
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  precision: 32
+  max_epochs: 100
+  max_steps: 2000
+  gradient_clip_val: 1.0
+  log_every_n_steps: 20
+  val_check_interval: 500
+  limit_val_batches: 20
+
+coord:
+  enabled: true
+  init_policy: lewm_epoch_10
+
+  # Match the official receding-horizon planner: perturb only the first coarse
+  # action block, but propagate its effect to the H=5 terminal latent.
+  rollout_horizon: 5
+  perturb_radius: 0.1565
+  perturb_first_only: true
+  num_directions: 4
+
+  # Two-radius finite-difference consistency gate.  Responses that change
+  # direction/gain strongly across radii are likely nonlinear/contact-switching
+  # and are excluded from geometry fitting.
+  inner_radius_scale: 0.5
+  reliability_cosine_min: 0.80
+  reliability_gain_min: 0.50
+  reliability_gain_max: 2.00
+  min_effective_radius: 1.0e-4
+  min_response_norm: 1.0e-4
+
+  # Generalized local response spectrum.  Only numerically non-null teacher
+  # modes are considered active; the relative floor is intentionally tiny so
+  # severely compressed but stable modes are retained.
+  gram_eps: 1.0e-6
+  input_eig_floor: 1.0e-5
+  response_eig_rel_floor: 1.0e-6
+  response_eig_abs_floor: 1.0e-8
+
+  # Conservative objective: only punish very poor conditioning.  We do not
+  # force all controllable modes to be equal.
+  kappa_max: 30.0
+  condition_weight: 1.0
+  identity_weight: 1.0
+
+  max_roundtrip_error: 2.0e-4
