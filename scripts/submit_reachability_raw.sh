@@ -105,6 +105,14 @@ python -u train.py \
   trainer.max_epochs=10 \
   output_model_name=$FORMAL_MODEL \
   subdir=$FORMAL_DIR
+
+# Keep the trained epoch-10 model, not ten redundant full model objects.
+find "$STABLEWM_HOME/$FORMAL_DIR" -maxdepth 1 -type f \
+  -name "${FORMAL_MODEL}_epoch_*_object.ckpt" \
+  ! -name "${FORMAL_MODEL}_epoch_10_object.ckpt" \
+  -print -delete
+rm -f "$STABLEWM_HOME/$FORMAL_DIR/${FORMAL_MODEL}_weights.ckpt"
+rm -rf "$STABLEWM_HOME/$SMOKE_DIR"
 EOF
 
 bash -n "$GEN_DIR/00_smoke.slurm"
