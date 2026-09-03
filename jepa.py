@@ -18,6 +18,7 @@ class JEPA(nn.Module):
         projector=None,
         pred_proj=None,
         factor_heads=None,
+        coordinate_adapter=None,
     ):
         super().__init__()
 
@@ -30,6 +31,10 @@ class JEPA(nn.Module):
         # not used by criterion()/get_cost(), so official raw-latent CEM is
         # unchanged at evaluation time.
         self.factor_heads = factor_heads
+        # Optional invertible latent-coordinate adapter. Older checkpoints do
+        # not have this attribute, so inference always accesses it through
+        # getattr(..., None) for backward compatibility.
+        self.coordinate_adapter = coordinate_adapter
 
     def encode(self, info):
         """Encode observations and actions into embeddings.
@@ -42,6 +47,9 @@ class JEPA(nn.Module):
         output = self.encoder(pixels, interpolate_pos_encoding=True)
         pixels_emb = output.last_hidden_state[:, 0]  # cls token
         emb = self.projector(pixels_emb)
+        adapter = getattr(self, "coordinate_adapter", None)
+        if adapter is not None:
+            emb = adapter(emb)
         info["emb"] = rearrange(emb, "(b t) d -> b t d", b=b)
 
         if "action" in info:
@@ -54,8 +62,19 @@ class JEPA(nn.Module):
         emb: (B, T, D)
         act_emb: (B, T, A_emb)
         """
-        preds = self.predictor(emb, act_emb)
+        adapter = getattr(self, "coordinate_adapter", None)
+        pred_input = emb
+        if adapter is not None:
+            # The frozen pretrained predictor lives in the original z frame.
+            # Conjugating it with A gives an exactly equivalent dynamics model
+            # in the new y=A z coordinate system:
+            #   P_y(y,a) = A P_z(A^{-1} y, a).
+            pred_input = adapter.inverse(emb)
+
+        preds = self.predictor(pred_input, act_emb)
         preds = self.pred_proj(rearrange(preds, "b t d -> (b t) d"))
+        if adapter is not None:
+            preds = adapter(preds)
         preds = rearrange(preds, "(b t) d -> b t d", b=emb.size(0))
         return preds
 
