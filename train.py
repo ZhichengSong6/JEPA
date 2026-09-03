@@ -130,6 +130,101 @@ def _cross_pair_indices(count, device, deterministic=False):
     return perm
 
 
+def _raw_reachability_loss(
+    emb,
+    goal_index,
+    min_pair_gap,
+    max_pair_gap,
+    margin_fraction,
+    temperature_fraction,
+    scale_eps,
+):
+    """Order raw Euclidean goal cost by remaining expert trajectory time.
+
+    The final observation at goal_index is the common future goal. For every
+    pre-goal pair i < j we require
+        ||z_j-z_g||^2 < ||z_i-z_g||^2,
+    because j is reachable to the exact same future goal in fewer expert
+    action blocks. No state/factor/reward label is used.
+
+    Distances are the same raw squared Euclidean distances used by JEPA/CEM.
+    A detached batch scale makes the soft ranking objective insensitive to a
+    trivial global rescaling of the representation; SiGReg continues to set
+    representation scale through the original LeWM objective.
+    """
+    if emb.ndim != 3:
+        raise ValueError(f'Expected emb (B,T,D), got {emb.shape}.')
+    goal_index = int(goal_index)
+    if goal_index <= 1 or goal_index >= emb.shape[1]:
+        raise ValueError(
+            f'goal_index={goal_index} requires at least goal_index+1 frames; '
+            f'got T={emb.shape[1]}.'
+        )
+
+    min_pair_gap = int(min_pair_gap)
+    max_pair_gap = int(max_pair_gap)
+    if min_pair_gap < 1 or max_pair_gap < min_pair_gap:
+        raise ValueError('Invalid reachability pair-gap range.')
+
+    goal = emb[:, goal_index:goal_index + 1]
+    prefix = emb[:, :goal_index]
+    raw_goal_cost = (prefix - goal).square().sum(dim=-1)
+
+    earlier_idx, later_idx, temporal_gaps = [], [], []
+    for i in range(goal_index):
+        for j in range(i + 1, goal_index):
+            gap = j - i
+            if min_pair_gap <= gap <= max_pair_gap:
+                earlier_idx.append(i)
+                later_idx.append(j)
+                temporal_gaps.append(gap)
+    if not earlier_idx:
+        raise ValueError('Reachability pair sampler produced no pairs.')
+
+    device = emb.device
+    earlier_idx = torch.as_tensor(earlier_idx, device=device, dtype=torch.long)
+    later_idx = torch.as_tensor(later_idx, device=device, dtype=torch.long)
+    temporal_gaps = torch.as_tensor(
+        temporal_gaps, device=device, dtype=torch.long
+    )
+
+    earlier = raw_goal_cost.index_select(1, earlier_idx)
+    later = raw_goal_cost.index_select(1, later_idx)
+
+    scale = raw_goal_cost.detach().mean().clamp_min(float(scale_eps))
+    temperature = max(float(temperature_fraction), 1e-6) * scale
+    margin = float(margin_fraction) * scale
+    logits = (later - earlier + margin) / temperature
+    loss = torch.nn.functional.softplus(logits).mean()
+
+    with torch.no_grad():
+        ordered = earlier > later
+        accuracy = ordered.float().mean()
+        adjacent = temporal_gaps == 1
+        long_gap = temporal_gaps >= max(2, max_pair_gap)
+        adjacent_accuracy = (
+            ordered[:, adjacent].float().mean()
+            if bool(adjacent.any())
+            else torch.tensor(float('nan'), device=device)
+        )
+        long_gap_accuracy = (
+            ordered[:, long_gap].float().mean()
+            if bool(long_gap.any())
+            else torch.tensor(float('nan'), device=device)
+        )
+
+    return {
+        'loss': loss,
+        'accuracy': accuracy,
+        'adjacent_accuracy': adjacent_accuracy,
+        'long_gap_accuracy': long_gap_accuracy,
+        'raw_goal_cost_scale': scale,
+        'first_goal_cost': raw_goal_cost[:, 0].mean().detach(),
+        'last_pregoal_cost': raw_goal_cost[:, -1].mean().detach(),
+        'num_pairs': int(len(earlier_idx)),
+    }
+
+
 def lejepa_forward(self, batch, stage, cfg):
     """Encode observations, predict next states, and compute losses."""
 
@@ -145,16 +240,61 @@ def lejepa_forward(self, batch, stage, cfg):
     emb = output['emb']  # (B, T, D)
     act_emb = output['act_emb']
 
-    ctx_emb = emb[:, :ctx_len]
+    # Keep the base LeWM objective numerically unchanged even when the loader
+    # provides extra future frames for reachability supervision.
+    core_len = int(ctx_len + n_preds)
+    if emb.shape[1] < core_len:
+        raise ValueError(
+            f'LeWM core needs {core_len} frames, got {emb.shape[1]}.'
+        )
+    core_emb = emb[:, :core_len]
+    ctx_emb = core_emb[:, :ctx_len]
     ctx_act = act_emb[:, :ctx_len]
 
-    tgt_emb = emb[:, n_preds:]  # label
-    pred_emb = self.model.predict(ctx_emb, ctx_act)  # prediction
+    tgt_emb = core_emb[:, n_preds:core_len]
+    pred_emb = self.model.predict(ctx_emb, ctx_act)
 
-    # Original LeWM objective. Keep this path unchanged when factor.enabled=False.
     output['pred_loss'] = (pred_emb - tgt_emb).pow(2).mean()
-    output['sigreg_loss'] = self.sigreg(emb.transpose(0, 1))
+    output['sigreg_loss'] = self.sigreg(core_emb.transpose(0, 1))
     output['loss'] = output['pred_loss'] + lambd * output['sigreg_loss']
+
+    if cfg.reachability.enabled:
+        if cfg.factor.enabled:
+            raise ValueError(
+                'Train Reachability-Raw without Factor supervision; '
+                'the two interventions must stay disentangled.'
+            )
+        reach = _raw_reachability_loss(
+            emb=emb,
+            goal_index=cfg.reachability.goal_offset_coarse,
+            min_pair_gap=cfg.reachability.min_pair_gap,
+            max_pair_gap=cfg.reachability.max_pair_gap,
+            margin_fraction=cfg.reachability.margin_fraction,
+            temperature_fraction=cfg.reachability.temperature_fraction,
+            scale_eps=cfg.reachability.scale_eps,
+        )
+        output['reachability_loss'] = reach['loss']
+        output['loss'] = (
+            output['loss']
+            + float(cfg.reachability.weight) * output['reachability_loss']
+        )
+        self.log_dict(
+            {
+                f'{stage}/reachability_accuracy': reach['accuracy'],
+                f'{stage}/reachability_adjacent_accuracy':
+                    reach['adjacent_accuracy'],
+                f'{stage}/reachability_long_gap_accuracy':
+                    reach['long_gap_accuracy'],
+                f'{stage}/reachability_raw_goal_cost_scale':
+                    reach['raw_goal_cost_scale'],
+                f'{stage}/reachability_first_goal_cost':
+                    reach['first_goal_cost'],
+                f'{stage}/reachability_last_pregoal_cost':
+                    reach['last_pregoal_cost'],
+            },
+            on_step=True,
+            sync_dist=True,
+        )
 
     if cfg.factor.enabled:
         if self.model.factor_heads is None:
@@ -260,6 +400,14 @@ def run(cfg):
 
     dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
     transforms = [get_img_preprocessor(source='pixels', target='pixels', img_size=cfg.img_size)]
+
+    if cfg.reachability.enabled:
+        required_steps = int(cfg.reachability.goal_offset_coarse) + 1
+        if int(cfg.data.dataset.num_steps) < required_steps:
+            raise ValueError(
+                'Reachability-Raw requires data.dataset.num_steps >= '
+                f'{required_steps}, got {cfg.data.dataset.num_steps}.'
+            )
 
     # Derive the physical factor from RAW state before the official state
     # z-score normalizer is appended below. This preserves theta in radians
