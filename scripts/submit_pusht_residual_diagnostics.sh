@@ -57,6 +57,7 @@ export MUJOCO_GL=egl
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=4
 export CUDA_VISIBLE_DEVICES=0
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "node=\$(hostname)"
 echo "python=\$(which python)"
@@ -95,6 +96,7 @@ python -u eval_pusht_diagnostic_b_case93.py \
   +diagnostic.n_steps=30 \
   +diagnostic.replay_iterations='[0,3,9,19,29]' \
   +diagnostic.topk=30 \
+  +diagnostic.candidate_chunk=100 \
   +diagnostic.base_seed=42
 fi
 
