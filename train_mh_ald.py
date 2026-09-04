@@ -1,4 +1,4 @@
-"""Train Multi-Horizon Anchored Local Dynamics (MH-MH-ALD) on full PushT.
+"""Train Multi-Horizon Anchored Local Dynamics (MH-ALD) on full PushT.
 
 Decisive pretrained-only experiment:
 
@@ -23,7 +23,7 @@ import torch
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
-from anchored_local_dynamics import mh_mh_ald_forward
+from anchored_local_dynamics import mh_ald_forward
 from module import SIGReg
 from utils import ModelObjectCallBack, get_column_normalizer, get_img_preprocessor
 
@@ -74,14 +74,14 @@ def _count_parameters(module):
 def run(cfg):
     pl.seed_everything(int(cfg.seed), workers=True)
 
-    if not bool(cfg.mh_mh_ald.enabled):
-        raise ValueError("train_ald.py requires mh_ald.enabled=True.")
+    if not bool(cfg.mh_ald.enabled):
+        raise ValueError("train_mh_ald.py requires mh_ald.enabled=True.")
     if "state" in cfg.data.dataset.keys_to_load:
         raise ValueError(
             "MH-ALD must not load privileged simulator state. Use data=pusht_mh_ald."
         )
 
-    expected_steps = int(cfg.wm.history_size) + int(cfg.mh_mh_ald.rollout_horizon)
+    expected_steps = int(cfg.wm.history_size) + int(cfg.mh_ald.rollout_horizon)
     if int(cfg.data.dataset.num_steps) != expected_steps:
         raise ValueError(
             "MH-ALD sequence length mismatch. Expected "
