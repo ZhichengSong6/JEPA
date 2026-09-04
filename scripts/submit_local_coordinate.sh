@@ -14,13 +14,22 @@ CONDA_ENV="lewm"
 NODE="${NODE:-4090node3}"
 MODE="${MODE:-smoke}"
 
-if [[ "$NODE" != "4090node2" && "$NODE" != "4090node3" ]]; then
-  echo "NODE must be 4090node2 or 4090node3" >&2
-  exit 2
-fi
 if [[ "$MODE" != "smoke" && "$MODE" != "formal" ]]; then
   echo "MODE must be smoke or formal" >&2
   exit 2
+fi
+
+if [[ "$MODE" == "formal" ]]; then
+  if [[ "$NODE" != "4090node2" && "$NODE" != "4090node3" ]]; then
+    echo "Formal runs are restricted to 4090node2/4090node3 by default." >&2
+    exit 2
+  fi
+else
+  if [[ "$NODE" != "4090node2" && "$NODE" != "4090node3" \
+     && "$NODE" != "3090node1" && "$NODE" != "3090node2" && "$NODE" != "3090node3" ]]; then
+    echo "Smoke NODE must be 4090node2/3 or 3090node1/2/3." >&2
+    exit 2
+  fi
 fi
 
 cd "$REPO"
