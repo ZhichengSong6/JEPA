@@ -1,0 +1,81 @@
+defaults:
+  - _self_
+  - data: pusht_mh_ald
+
+output_model_name: lewm_mh_ald_h5_ddp4
+subdir: pusht_mh_ald_h5_seed3072_ep10_ddp4
+
+num_workers: 6
+train_split: 0.9
+seed: 3072
+img_size: 224
+
+trainer:
+  max_epochs: 10
+  devices: auto
+  num_nodes: 1
+  accelerator: gpu
+  strategy: auto
+  sync_batchnorm: false
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 64
+  num_workers: ${num_workers}
+  persistent_workers: true
+  prefetch_factor: 3
+  pin_memory: true
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+wandb:
+  enabled: false
+  config:
+    entity: lewm
+    project: lewm
+    name: ${output_model_name}
+    id: ${subdir}
+    resume: allow
+    log_model: false
+
+wm:
+  type: lewm
+  history_size: 3
+  num_preds: 1
+  embed_dim: 192
+
+# Kept only for compatibility with the existing spt.Module field.  SIGReg is
+# intentionally NOT included in the ALD objective because encoder/projector are
+# frozen, hence SIGReg would have zero optimization effect.
+loss:
+  sigreg:
+    kwargs:
+      knots: 17
+      num_proj: 1024
+
+mh_ald:
+  enabled: true
+
+  # Pretrained-only calibration: student and teacher start from the exact same
+  # official LeWM epoch-10 model.  Student visual encoder/projector are frozen.
+  init_policy: lewm_epoch_10
+  teacher_policy: lewm_epoch_10
+
+  rollout_horizon: 5
+
+  # Clean objective: L = TF + rollout + MH-ALD.
+  # Keep the original ALD weights for a controlled apples-to-apples test.
+  tf_weight: 1.0
+  rollout_weight: 1.0
+  weight: 1.0
+
+  # Same raw-action perturbation scale as the successful H5 ALD.
+  # One independent symmetric direction is sampled at each of the five
+  # planner action blocks; all causally affected future horizons are trained.
+  perturb_radius: 0.1565
+  directions_per_position: 1
+  probes_per_chunk: 2
