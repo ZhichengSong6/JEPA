@@ -31,9 +31,9 @@ class JEPA(nn.Module):
         # not used by criterion()/get_cost(), so official raw-latent CEM is
         # unchanged at evaluation time.
         self.factor_heads = factor_heads
-        # Optional invertible latent-coordinate adapter. Older checkpoints do
-        # not have this attribute, so inference always accesses it through
-        # getattr(..., None) for backward compatibility.
+        # Optional invertible latent-coordinate map (global linear or
+        # nonlinear local chart). Older checkpoints do not have this
+        # attribute, so inference accesses it through getattr(..., None).
         self.coordinate_adapter = coordinate_adapter
 
     def encode(self, info):
@@ -66,9 +66,9 @@ class JEPA(nn.Module):
         pred_input = emb
         if adapter is not None:
             # The frozen pretrained predictor lives in the original z frame.
-            # Conjugating it with A gives an exactly equivalent dynamics model
-            # in the new y=A z coordinate system:
-            #   P_y(y,a) = A P_z(A^{-1} y, a).
+            # Conjugating it through any exactly invertible coordinate map Phi
+            # gives the same underlying dynamics in y coordinates:
+            #   P_y(y,a) = Phi(P_z(Phi^{-1}(y), a)).
             pred_input = adapter.inverse(emb)
 
         preds = self.predictor(pred_input, act_emb)
