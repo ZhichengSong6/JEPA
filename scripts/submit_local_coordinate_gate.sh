@@ -15,10 +15,11 @@ OUT_DIR="$REPO/outputs/local_coordinate_gate"
 LOG_DIR="$REPO/logs"
 GEN_DIR="$REPO/slurm/generated_local_coordinate_gate"
 
-# Default project policy: formal/scientific jobs go to 4090node2/3 unless the
-# user explicitly asks otherwise.
-if [[ "$NODE" != "4090node2" && "$NODE" != "4090node3" ]]; then
-  echo "NODE must be 4090node2 or 4090node3" >&2
+# Default project policy is 4090node2/3.  For this fixed-population evaluation
+# only, 3090 nodes are also allowed when explicitly requested by the user.
+if [[ "$NODE" != "4090node2" && "$NODE" != "4090node3" \
+   && "$NODE" != "3090node1" && "$NODE" != "3090node2" && "$NODE" != "3090node3" ]]; then
+  echo "NODE must be 4090node2/3 or 3090node1/2/3" >&2
   exit 2
 fi
 
