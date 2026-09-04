@@ -1,0 +1,82 @@
+defaults:
+  - _self_
+  - data: pusht_local_coordinate
+
+output_model_name: lewm_local_coordinate
+subdir: pusht_local_coordinate_seed3072
+seed: 3072
+train_split: 0.9
+img_size: 224
+
+wm:
+  history_size: 3
+  embed_dim: 192
+
+loader:
+  batch_size: 8
+  num_workers: 6
+  persistent_workers: true
+  prefetch_factor: 2
+  pin_memory: true
+
+val_loader:
+  batch_size: 8
+  num_workers: 4
+  persistent_workers: true
+  prefetch_factor: 2
+  pin_memory: true
+
+optimizer:
+  lr: 3.0e-4
+  weight_decay: 0.0
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  precision: 32
+  max_epochs: 100
+  max_steps: 2000
+  gradient_clip_val: 1.0
+  log_every_n_steps: 20
+  val_check_interval: 500
+  limit_val_batches: 20
+
+local_coord:
+  enabled: true
+  init_policy: lewm_epoch_10
+
+  # Exact-inverse nonlinear coordinate map.
+  hidden_dim: 256
+  num_blocks: 4
+  max_shift: 1.0
+
+  # Match the official receding-horizon planner at H=5.  The future goal is
+  # another five coarse steps later, so training sees a reachable residual
+  # beyond the current planning horizon rather than a zero residual.
+  rollout_horizon: 5
+  goal_offset: 5
+  perturb_radius: 0.1565
+  perturb_first_only: true
+  num_directions: 6
+
+  # Two-radius response reliability gate.
+  inner_radius_scale: 0.5
+  reliability_cosine_min: 0.80
+  reliability_gain_min: 0.50
+  reliability_gain_max: 2.00
+  min_effective_radius: 1.0e-4
+  min_response_norm: 1.0e-4
+
+  # Frozen-teacher rank definition.
+  min_active_rank: 2
+  response_svd_rel_floor: 1.0e-4
+  response_svd_abs_floor: 1.0e-6
+  min_goal_residual_norm: 1.0e-3
+  energy_eps: 1.0e-8
+
+  # Main objective.  There is deliberately NO condition-number/whitening loss.
+  alignment_weight: 1.0
+  identity_weight: 0.05
+
+  max_roundtrip_error: 2.0e-5
