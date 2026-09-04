@@ -37,8 +37,8 @@ LOCAL_BATCH=16
 GLOBAL_BATCH=$((WORLD_SIZE * LOCAL_BATCH))
 NUM_WORKERS_PER_RANK=4
 
-SMOKE_DIR="pusht_mh_mh_ald_smoke_ddp4"
-SMOKE_MODEL="lewm_mh_mh_ald_smoke_ddp4"
+SMOKE_DIR="pusht_mh_ald_smoke_ddp4"
+SMOKE_MODEL="lewm_mh_ald_smoke_ddp4"
 FORMAL_DIR="pusht_mh_ald_h5_seed3072_ep10_ddp4"
 FORMAL_MODEL="lewm_mh_ald_h5_ddp4"
 
@@ -78,7 +78,7 @@ export NCCL_DEBUG=WARN
 EOF
 )
 
-# No SyncBatchNorm: ALD deliberately calibrates under inference semantics with
+# No SyncBatchNorm: MH-ALD deliberately calibrates under inference semantics with
 # frozen BN running statistics.  local batch 16 x 4 ranks preserves global 64.
 COMMON_HYDRA="seed=3072 num_workers=$NUM_WORKERS_PER_RANK trainer.devices=$WORLD_SIZE trainer.num_nodes=1 trainer.strategy=ddp trainer.sync_batchnorm=false loader.batch_size=$LOCAL_BATCH"
 
@@ -108,7 +108,7 @@ else
     exit 3
   fi
 
-  FILE="$GEN_DIR/ald_formal.slurm"
+  FILE="$GEN_DIR/mh_ald_formal.slurm"
   cat > "$FILE" <<EOF
 #!/bin/bash
 #SBATCH --job-name=mhald_h5_4
