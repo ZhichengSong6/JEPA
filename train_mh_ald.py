@@ -6,7 +6,7 @@ Decisive pretrained-only experiment:
 * frozen visual frame: student encoder + projector
 * frozen teacher     : official LeWM epoch 10
 * trainable          : action encoder + predictor + pred_proj
-* objective          : one-step TF + H-step rollout + multi-horizon MH-ALD
+* objective          : one-step TF + H-step rollout + MH-ALD
 
 No privileged simulator state or counterfactual ground-truth rollout is used.
 """
