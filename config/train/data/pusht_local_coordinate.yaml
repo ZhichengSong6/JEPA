@@ -1,0 +1,14 @@
+# Offline sequence for nonlinear local-coordinate training.
+# We need H rollout steps plus an additional future-goal offset.
+# No privileged simulator state is loaded.
+dataset:
+  num_steps: ${eval:'${wm.history_size} + ${local_coord.rollout_horizon} + ${local_coord.goal_offset}'}
+  frameskip: 5
+  name: pusht_expert_train
+  keys_to_load:
+    - pixels
+    - action
+    - proprio
+  keys_to_cache:
+    - action
+    - proprio
