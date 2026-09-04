@@ -56,12 +56,14 @@ export STABLEWM_HOME="$DATA"
 export MUJOCO_GL=egl
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=4
-export CUDA_VISIBLE_DEVICES=0
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "node=\$(hostname)"
 echo "commit=\$(git rev-parse HEAD)"
 python --version
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
+nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader || true
+nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv,noheader
 
 python -u eval_oracle_geometry_capacity.py \
   +diagnostic.run_dir="$RUN_DIR" \
@@ -71,7 +73,7 @@ python -u eval_oracle_geometry_capacity.py \
   +diagnostic.sources="[lewm,ald_tf]" \
   +diagnostic.solves="[0,1]" \
   +diagnostic.iterations="[0,3,9,19,29]" \
-  +diagnostic.model_batch_size=64 \
+  +diagnostic.model_batch_size=32 \
   +diagnostic.seed=3072 \
   +diagnostic.steps_diag=300 \
   +diagnostic.steps_full=500 \
