@@ -605,7 +605,7 @@ def run(cfg: DictConfig):
             )
 
         _save_json(baseline_path, payload)
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(_jsonable(payload), indent=2))
         print(f"Saved: {baseline_path}")
         return
 
