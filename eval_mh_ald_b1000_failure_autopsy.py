@@ -105,11 +105,13 @@ def _case_group_from_ceiling(row):
         return "unclassified"
     enc = _bool(row.get("encoder_oracle_success", False))
     phy = _bool(row.get("physical_oracle_success", False))
-    if enc:
-        return "predictor_limited_encoder_oracle_rescue"
-    if phy:
-        return "encoder_metric_candidate"
-    return "search_or_horizon_candidate"
+    if enc and phy:
+        return "both_oracles_rescue_strong_predictor_candidate"
+    if enc and not phy:
+        return "encoder_shaped_search_rescue"
+    if phy and not enc:
+        return "physical_only_encoder_metric_candidate"
+    return "neither_oracle_rescue_search_horizon_candidate"
 
 
 def _run_closed_loop(
@@ -858,10 +860,24 @@ def run(cfg: DictConfig):
                 "earlier elite updates, finite horizon, or action distribution "
                 "must change."
             ),
-            "encoder_metric_candidate": (
-                "Ceiling experiment was rescued by physical oracle but not "
-                "encoder oracle; use this autopsy to see where raw latent-L2 "
-                "rejects physically useful candidates."
+            "both_oracles_rescue_strong_predictor_candidate": (
+                "Both exact encoder and physical oracle rescue the baseline "
+                "failure. This is the strongest evidence that current MH "
+                "predictor/ranking is leaving recoverable performance on the table."
+            ),
+            "encoder_shaped_search_rescue": (
+                "Exact encoder oracle rescues but physical-terminal oracle does "
+                "not. This is search-path dependent: latent cost may provide "
+                "more useful CEM shaping than the terminal physical objective."
+            ),
+            "physical_only_encoder_metric_candidate": (
+                "Physical oracle rescues but exact encoder oracle does not. "
+                "This is the clearest candidate for a frozen-encoder/raw-L2 "
+                "metric bottleneck."
+            ),
+            "neither_oracle_rescue_search_horizon_candidate": (
+                "Neither oracle planner rescues under B=1000. Investigate "
+                "candidate coverage, finite horizon, and refinement trajectory."
             ),
         },
         "timing": {
