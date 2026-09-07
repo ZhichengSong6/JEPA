@@ -49,7 +49,10 @@ from eval_lowbudget_failure_autopsy import (
 from eval_b3000_paired_failure_analysis import _normalized_to_raw
 from pusht_exact_replay import (
     LiveVariationCapturePolicy,
+    LiveContextSolverPolicy,
     VariationInjectedDataset,
+    assert_reset_contexts_match,
+    capture_live_reset_contexts,
     load_goal_images,
     reset_physical_exact,
 )
@@ -203,6 +206,29 @@ class OracleCEMSolver:
         self.reset_contexts = list(reset_contexts or [])
         self.goal_images = list(goal_images or [])
         self._env_id_to_context_index = {}
+        self.live_vector_env = None
+        self._live_context_validated = False
+
+    def set_live_env(self, env):
+        self.live_vector_env = env
+
+    def _validate_live_context_once(self):
+        if self._live_context_validated:
+            return
+        if self.live_vector_env is None:
+            raise RuntimeError(
+                "Oracle solver did not receive the live World environment."
+            )
+        actual = capture_live_reset_contexts(self.live_vector_env)
+        assert_reset_contexts_match(self.reset_contexts, actual)
+        self._live_context_validated = True
+        counts = sorted(set(
+            int(x.get("variation_count", 0)) for x in actual
+        ))
+        print(
+            f"[exact-replay] oracle live context validation PASS; "
+            f"envs={len(actual)} variation_counts={counts}"
+        )
 
     def configure(self, *, action_space: gym.Space, n_envs: int, config):
         self._action_space = action_space
@@ -361,6 +387,7 @@ class OracleCEMSolver:
 
     @torch.inference_mode()
     def solve(self, info_dict, init_action=None):
+        self._validate_live_context_once()
         total_envs = len(next(iter(info_dict.values())))
         raw_states, goal_states = self._raw_states(info_dict)
         mean, var = self._init_action_distrib(total_envs, init_action)
@@ -474,7 +501,7 @@ def _run_oracle(
     world = swm.World(**world_cfg, image_shape=(224, 224))
     plan_config = swm.PlanConfig(**cfg.plan_config)
     transform = {"pixels": img_transform(cfg), "goal": img_transform(cfg)}
-    policy = swm.policy.WorldModelPolicy(
+    policy = LiveContextSolverPolicy(
         solver=solver,
         config=plan_config,
         process=process,
