@@ -558,6 +558,16 @@ def run(cfg: DictConfig):
             cfg, dataset, process, mh_policy, eval_episodes, eval_start
         )
         success = base["success"]
+        ctxs = base["live_reset_contexts"]
+        variation_counts = sorted(set(
+            int(x.get("variation_count", 0)) for x in ctxs
+        ))
+        sources = sorted(set(str(x.get("source", "")) for x in ctxs))
+        print(
+            f"[exact-replay] captured live contexts: {len(ctxs)}; "
+            f"variation counts per case: {variation_counts}; "
+            f"sources={sources}"
+        )
         failures = np.nonzero(~success)[0].astype(int).tolist()
         controls = _matched_controls(
             start_states, goal_states, success, failures, max_controls
