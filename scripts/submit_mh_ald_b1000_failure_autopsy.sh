@@ -42,7 +42,7 @@ if [[ "$MODE" == "smoke" ]]; then
   TOPK=3
   REPLAY_ITERS="[0,1]"
   MAX_SOLVES=1
-  CEILING_ARG=""
+  CEILING_ARG="+failure_autopsy.ceiling_manifest="
   EXPECTED=""
 else
   [[ -s "$CEILING_MANIFEST" ]] || {
