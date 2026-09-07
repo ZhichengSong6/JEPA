@@ -48,7 +48,8 @@ from eval_lowbudget_failure_autopsy import (
 )
 from eval_b3000_paired_failure_analysis import _normalized_to_raw
 from pusht_exact_replay import (
-    load_dataset_reset_contexts,
+    LiveVariationCapturePolicy,
+    VariationInjectedDataset,
     load_goal_images,
     reset_physical_exact,
 )
@@ -114,6 +115,9 @@ def _run_mh_baseline(cfg, dataset, process, policy_name, eval_episodes, eval_sta
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
     world_cfg["num_envs"] = int(len(eval_episodes))
     world_cfg["max_episode_steps"] = 2 * int(cfg.eval.eval_budget)
+    injected_dataset = VariationInjectedDataset(
+        dataset, reset_contexts
+    )
     world = swm.World(**world_cfg, image_shape=(224, 224))
 
     model = swm.policy.AutoCostModel(str(policy_name)).to("cuda").eval()
@@ -124,7 +128,7 @@ def _run_mh_baseline(cfg, dataset, process, policy_name, eval_episodes, eval_sta
     solver = hydra.utils.instantiate(solver_cfg, model=model)
     plan_config = swm.PlanConfig(**cfg.plan_config)
     transform = {"pixels": img_transform(cfg), "goal": img_transform(cfg)}
-    policy = swm.policy.WorldModelPolicy(
+    policy = LiveVariationCapturePolicy(
         solver=solver,
         config=plan_config,
         process=process,
@@ -134,7 +138,7 @@ def _run_mh_baseline(cfg, dataset, process, policy_name, eval_episodes, eval_sta
 
     t0 = time.time()
     metrics = world.evaluate_from_dataset(
-        dataset,
+        injected_dataset,
         start_steps=np.asarray(eval_start).tolist(),
         goal_offset_steps=int(cfg.eval.goal_offset_steps),
         eval_budget=int(cfg.eval.eval_budget),
@@ -142,12 +146,18 @@ def _run_mh_baseline(cfg, dataset, process, policy_name, eval_episodes, eval_sta
         callables=OmegaConf.to_container(cfg.eval.get("callables"), resolve=True),
     )
     elapsed = time.time() - t0
+    live_reset_contexts = policy.live_reset_contexts
     _close_world(world)
+    if live_reset_contexts is None:
+        raise RuntimeError(
+            "Failed to capture live baseline variation snapshots."
+        )
 
     return {
         "metrics": metrics,
         "success": np.asarray(metrics["episode_successes"], dtype=bool),
         "elapsed_seconds": elapsed,
+        "live_reset_contexts": live_reset_contexts,
     }
 
 
@@ -525,22 +535,12 @@ def run(cfg: DictConfig):
         dataset, eval_episodes, eval_start, cfg.eval.goal_offset_steps
     )
     process = _build_process(cfg, dataset)
-    reset_contexts = load_dataset_reset_contexts(dataset, eval_rows)
     exact_goal_images = load_goal_images(
         dataset,
         eval_episodes,
         eval_start,
         cfg.eval.goal_offset_steps,
     )
-    seed_count = sum(int(x.get("seed_available", False)) for x in reset_contexts)
-    variation_counts = sorted(set(
-        int(x.get("variation_count", 0)) for x in reset_contexts
-    ))
-    print(
-        f"[exact-replay] dataset seeds available: {seed_count}/{len(reset_contexts)}; "
-        f"variation counts per case: {variation_counts}"
-    )
-
     baseline_path = outdir / "baseline.json"
 
     if phase == "baseline":
@@ -584,6 +584,7 @@ def run(cfg: DictConfig):
             "control_eval_indices": controls,
             "selected_eval_indices": selected,
             "elapsed_seconds": float(base["elapsed_seconds"]),
+            "live_reset_contexts": base["live_reset_contexts"],
         }
         if expected_baseline is not None and abs(
             payload["success_rate"] - float(expected_baseline)
@@ -612,7 +613,15 @@ def run(cfg: DictConfig):
         print("Oracle information is diagnostic only.")
         print("============================================================")
 
-        subset_contexts = [reset_contexts[int(i)] for i in selected]
+        baseline_contexts = baseline.get("live_reset_contexts", None)
+        if baseline_contexts is None:
+            raise RuntimeError(
+                "Baseline JSON predates live variation capture. "
+                "Re-run ceiling baseline/formal before oracle phases."
+            )
+        subset_contexts = [
+            baseline_contexts[int(i)] for i in selected
+        ]
         subset_goal_images = [exact_goal_images[int(i)] for i in selected]
         result = _run_oracle(
             cfg,
@@ -717,11 +726,13 @@ def run(cfg: DictConfig):
             ),
         },
         "target_success_rate": target,
-        "exact_dataset_reset_context": True,
+        "exact_live_reset_context": True,
         "reset_context_protocol": (
-            "Every oracle candidate is replayed with the SAME dataset episode "
-            "seed and stored variation.* values for that case; encoder-oracle "
-            "goal embedding uses the exact raw dataset goal frame."
+            "Baseline official World snapshots every live sub-env's current "
+            "variation_space values after reset. Oracle Worlds are reset via "
+            "an injected dataset view to those SAME captured variations, and "
+            "every oracle candidate replay reuses the same case snapshot. "
+            "Encoder-oracle goal embedding uses the exact raw dataset goal frame."
         ),
         "encoder_oracle_reaches_target": bool(enc_ceiling >= target),
         "physical_oracle_reaches_target": bool(phy_ceiling >= target),
