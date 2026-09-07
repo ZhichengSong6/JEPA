@@ -92,24 +92,24 @@ echo "============================================================"
 
 echo
 echo "=== PHASE 1: current MH-ALD baseline ==="
-CUDA_VISIBLE_DEVICES=0 python -u eval_pusht_b1000_ceiling.py   "${COMMON_ARGS[@]}"   +ceiling.phase=baseline   $EXPECTED
+CUDA_VISIBLE_DEVICES=0 python -u eval_pusht_b1000_ceiling.py   "\${COMMON_ARGS[@]}"   +ceiling.phase=baseline   $EXPECTED
 
 echo
 echo "=== PHASE 2A: encoder oracle on baseline failures + controls ==="
-CUDA_VISIBLE_DEVICES=1 python -u eval_pusht_b1000_ceiling.py   "${COMMON_ARGS[@]}"   +ceiling.phase=encoder &
-P1=$!
+CUDA_VISIBLE_DEVICES=1 python -u eval_pusht_b1000_ceiling.py   "\${COMMON_ARGS[@]}"   +ceiling.phase=encoder &
+P1=\$!
 
 echo
 echo "=== PHASE 2B: physical oracle on same cases ==="
-CUDA_VISIBLE_DEVICES=2 python -u eval_pusht_b1000_ceiling.py   "${COMMON_ARGS[@]}"   +ceiling.phase=physical &
-P2=$!
+CUDA_VISIBLE_DEVICES=2 python -u eval_pusht_b1000_ceiling.py   "\${COMMON_ARGS[@]}"   +ceiling.phase=physical &
+P2=\$!
 
-wait "$P1"
-wait "$P2"
+wait "\$P1"
+wait "\$P2"
 
 echo
 echo "=== PHASE 3: summarize ceilings ==="
-CUDA_VISIBLE_DEVICES=0 python -u eval_pusht_b1000_ceiling.py   "${COMMON_ARGS[@]}"   +ceiling.phase=summary
+CUDA_VISIBLE_DEVICES=0 python -u eval_pusht_b1000_ceiling.py   "\${COMMON_ARGS[@]}"   +ceiling.phase=summary
 
 echo
 echo "=== CEILING JOB DONE ==="
