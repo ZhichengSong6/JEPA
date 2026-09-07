@@ -66,6 +66,8 @@ from eval_b3000_paired_failure_analysis import (
 )
 from pusht_exact_replay import (
     LiveVariationCapturePolicy,
+    VariationInjectedDataset,
+    assert_reset_contexts_match,
     load_goal_images,
     reset_physical_exact,
 )
@@ -121,6 +123,7 @@ def _run_closed_loop(
     policy_name,
     eval_episodes,
     eval_start,
+    expected_reset_contexts=None,
 ):
     device = torch.device(str(cfg.solver.device))
     model = swm.policy.AutoCostModel(str(policy_name)).to(device).eval()
@@ -145,6 +148,11 @@ def _run_closed_loop(
         2 * int(cfg.eval.eval_budget),
         int(cfg.eval.goal_offset_steps) + 1,
     )
+    eval_dataset = (
+        VariationInjectedDataset(dataset, expected_reset_contexts)
+        if expected_reset_contexts is not None
+        else dataset
+    )
     world = swm.World(**world_cfg, image_shape=(224, 224))
     plan_config = swm.PlanConfig(**cfg.plan_config)
     transform = {"pixels": img_transform(cfg), "goal": img_transform(cfg)}
@@ -158,7 +166,7 @@ def _run_closed_loop(
 
     t0 = time.time()
     metrics = world.evaluate_from_dataset(
-        dataset,
+        eval_dataset,
         start_steps=np.asarray(eval_start).tolist(),
         goal_offset_steps=int(cfg.eval.goal_offset_steps),
         eval_budget=int(cfg.eval.eval_budget),
@@ -173,6 +181,14 @@ def _run_closed_loop(
     if live_reset_contexts is None:
         raise RuntimeError(
             "Failed to capture live official-environment variations."
+        )
+    if expected_reset_contexts is not None:
+        assert_reset_contexts_match(
+            expected_reset_contexts, live_reset_contexts
+        )
+        print(
+            "[exact-replay] autopsy closed-loop context validation PASS; "
+            f"envs={len(live_reset_contexts)}"
         )
 
     return model, solver, metrics, success, elapsed, live_reset_contexts
@@ -376,6 +392,28 @@ def run(cfg: DictConfig):
     )
     print("============================================================")
 
+    expected_reset_contexts = None
+    ceiling_baseline = None
+    if ceiling_manifest_path is not None:
+        baseline_path = ceiling_manifest_path.parent / "baseline.json"
+        if not baseline_path.exists():
+            raise FileNotFoundError(
+                f"Missing matched ceiling baseline: {baseline_path}"
+            )
+        ceiling_baseline = json.loads(baseline_path.read_text())
+        expected_reset_contexts = ceiling_baseline.get(
+            "live_reset_contexts", None
+        )
+        if expected_reset_contexts is None:
+            raise RuntimeError(
+                "Matched ceiling baseline has no live_reset_contexts."
+            )
+        if len(expected_reset_contexts) != int(cfg.eval.num_eval):
+            raise RuntimeError(
+                "Matched ceiling context count does not equal eval.num_eval: "
+                f"{len(expected_reset_contexts)} vs {cfg.eval.num_eval}"
+            )
+
     t0 = time.time()
     (
         model,
@@ -385,7 +423,13 @@ def run(cfg: DictConfig):
         closed_loop_seconds,
         reset_contexts,
     ) = _run_closed_loop(
-        cfg, dataset, process, mh_policy, eval_episodes, eval_start
+        cfg,
+        dataset,
+        process,
+        mh_policy,
+        eval_episodes,
+        eval_start,
+        expected_reset_contexts=expected_reset_contexts,
     )
     variation_counts = sorted(set(
         int(x.get("variation_count", 0)) for x in reset_contexts
@@ -396,7 +440,15 @@ def run(cfg: DictConfig):
         f"variation counts per case: {variation_counts}; sources={sources}"
     )
 
-    if expected_success is not None and abs(
+    if ceiling_baseline is not None:
+        expected_rate = float(ceiling_baseline["success_rate"])
+        if abs(float(metrics["success_rate"]) - expected_rate) > 1e-6:
+            raise RuntimeError(
+                "Autopsy closed-loop success rate does not reproduce the "
+                f"matched ceiling baseline: got {metrics['success_rate']} "
+                f"expected {expected_rate}"
+            )
+    elif expected_success is not None and abs(
         float(metrics["success_rate"]) - float(expected_success)
     ) > 1e-6:
         print(
@@ -826,6 +878,9 @@ def run(cfg: DictConfig):
                 else None
             ),
             "exact_live_reset_context": True,
+            "matched_ceiling_contexts": bool(
+                expected_reset_contexts is not None
+            ),
             "reset_context_protocol": (
                 "Official closed-loop World snapshots every live sub-env's "
                 "current variation_space values after reset. Every diagnostic "
