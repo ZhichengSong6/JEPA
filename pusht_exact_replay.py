@@ -272,5 +272,58 @@ class VariationInjectedDataset:
                     )
                 val = np.asarray(values[name])
                 arr = np.broadcast_to(val, (t, *val.shape)).copy()
-                ep[f"variation.{name}"] = arr
+                # World.evaluate_from_dataset checks ep[col][0] and skips
+                # numpy scalar values. A torch scalar is accepted and then
+                # converted to a 0-D ndarray, preserving scalar variations
+                # such as angle/scale/shape/render_goal.
+                ep[f"variation.{name}"] = torch.from_numpy(arr)
         return chunks
+
+
+def assert_reset_contexts_match(expected_contexts, actual_contexts):
+    """Raise if live oracle variations differ from captured baseline values."""
+    if len(expected_contexts) != len(actual_contexts):
+        raise RuntimeError(
+            "Exact-replay context count mismatch: "
+            f"expected {len(expected_contexts)}, got {len(actual_contexts)}"
+        )
+
+    mismatches = []
+    for i, (expected, actual) in enumerate(
+        zip(expected_contexts, actual_contexts)
+    ):
+        enames, evals = context_variations(expected)
+        anames, avals = context_variations(actual)
+        if set(enames) != set(anames):
+            mismatches.append(
+                f"env{i}: names differ expected={sorted(enames)} "
+                f"actual={sorted(anames)}"
+            )
+            continue
+
+        for name in enames:
+            ev = np.asarray(evals[name])
+            av = np.asarray(avals[name])
+            same = (
+                ev.shape == av.shape
+                and (
+                    np.array_equal(ev, av)
+                    if ev.dtype.kind in "biu" and av.dtype.kind in "biu"
+                    else np.allclose(ev, av, rtol=0.0, atol=1e-7)
+                )
+            )
+            if not same:
+                mismatches.append(
+                    f"env{i}:{name} expected={ev!r} actual={av!r}"
+                )
+                if len(mismatches) >= 20:
+                    break
+        if len(mismatches) >= 20:
+            break
+
+    if mismatches:
+        raise RuntimeError(
+            "Oracle World variation snapshot does not match baseline. "
+            + " | ".join(mismatches)
+        )
+    return True
