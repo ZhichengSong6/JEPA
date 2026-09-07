@@ -334,10 +334,13 @@ def run(cfg: DictConfig):
     )))
     max_solves_per_case = int(acfg.get("max_solves_per_case", 0))
     model_batch_size = int(acfg.get("model_batch_size", 64))
-    ceiling_manifest_path = Path(str(acfg.get(
+    ceiling_manifest_value = str(acfg.get(
         "ceiling_manifest",
         "outputs/mh_ald_b1000_ceiling_latest/ceiling_case_manifest.csv",
-    )))
+    )).strip()
+    ceiling_manifest_path = (
+        Path(ceiling_manifest_value) if ceiling_manifest_value else None
+    )
     expected_success = acfg.get("expected_success", None)
     mh_policy = str(acfg.get(
         "mh_policy",
@@ -370,7 +373,10 @@ def run(cfg: DictConfig):
         f"K={cfg.solver.topk} B={int(cfg.solver.num_samples)*int(cfg.solver.n_steps)}"
     )
     print(f"eval={cfg.eval.num_eval} seed={cfg.seed}")
-    print(f"ceiling_manifest={ceiling_manifest_path}")
+    print(
+        "ceiling_manifest="
+        + (str(ceiling_manifest_path) if ceiling_manifest_path is not None else "<disabled>")
+    )
     print("============================================================")
 
     t0 = time.time()
@@ -387,7 +393,11 @@ def run(cfg: DictConfig):
         )
 
     failures = np.nonzero(~success)[0].astype(int).tolist()
-    ceiling_rows = _load_ceiling_manifest(ceiling_manifest_path)
+    ceiling_rows = (
+        _load_ceiling_manifest(ceiling_manifest_path)
+        if ceiling_manifest_path is not None
+        else []
+    )
     ceiling_by_idx = {
         int(r["eval_index"]): r
         for r in ceiling_rows
@@ -813,7 +823,11 @@ def run(cfg: DictConfig):
                         * int(cfg.solver.n_steps),
             "replay_iterations": replay_iterations,
             "max_solves_per_case": max_solves_per_case,
-            "ceiling_manifest": str(ceiling_manifest_path),
+            "ceiling_manifest": (
+                str(ceiling_manifest_path)
+                if ceiling_manifest_path is not None
+                else None
+            ),
             "variation_restore": True,
             "physical_oracle_used_for_planning": False,
         },
