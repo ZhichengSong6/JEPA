@@ -116,6 +116,9 @@ def aggregate(rows):
         "pred_elite_overlap_phys",
         "pred_elite_update_cos_phys",
         "pred_selected_phys_percentile",
+        "pred_selected_phys_cost",
+        "pred_selection_regret",
+        "pred_oracle_best_rank_percentile",
         "execpred_elite_overlap_phys",
         "execpred_selected_phys_percentile",
         "trace_topk_phys_mean",
@@ -301,8 +304,17 @@ def main():
 
                     pe = elite_metrics(phys_cost, pred_cost, deltas, min(topk, len(c_norm)))
                     ee = elite_metrics(phys_cost, exec_pred_cost, deltas, min(topk, len(c_norm)))
-                    pred_pct, _ = selection_percentile(phys_cost, pred_cost)
-                    exec_pct, _ = selection_percentile(phys_cost, exec_pred_cost)
+                    pred_pct, pred_sel = selection_percentile(phys_cost, pred_cost)
+                    exec_pct, exec_sel = selection_percentile(phys_cost, exec_pred_cost)
+                    oracle_idx = int(np.nanargmin(phys_cost))
+                    pred_ranks = np.argsort(np.argsort(pred_cost, kind="mergesort"), kind="mergesort")
+                    pred_oracle_rank_pct = float(
+                        pred_ranks[oracle_idx] / max(len(pred_cost) - 1, 1)
+                    )
+                    pred_selected_phys_cost = float(phys_cost[pred_sel])
+                    pred_selection_regret = float(
+                        phys_cost[pred_sel] - phys_cost[oracle_idx]
+                    )
 
                     row = {
                         "trace_source": a.trace_label,
@@ -335,6 +347,9 @@ def main():
                         "pred_elite_overlap_phys": pe["elite_overlap"],
                         "pred_elite_update_cos_phys": pe["elite_update_cosine"],
                         "pred_selected_phys_percentile": pred_pct,
+                        "pred_selected_phys_cost": pred_selected_phys_cost,
+                        "pred_selection_regret": pred_selection_regret,
+                        "pred_oracle_best_rank_percentile": pred_oracle_rank_pct,
                         "execpred_elite_overlap_phys": ee["elite_overlap"],
                         "execpred_elite_update_cos_phys": ee["elite_update_cosine"],
                         "execpred_selected_phys_percentile": exec_pct,
@@ -394,7 +409,7 @@ def main():
         )
 
     print("\nCEM-population fidelity")
-    print(f"{'model':<10} {'it':>3} {'radius':>8} {'oob':>7} {'rhoP':>7} {'rhoClip':>8} {'rhoE/P':>8} {'elite':>7} {'pct':>7}")
+    print(f"{'model':<10} {'it':>3} {'radius':>8} {'oob':>7} {'rhoP':>7} {'rhoClip':>8} {'rhoE/P':>8} {'elite':>7} {'pct':>7} {'regret':>9}")
     for s in summary:
         print(
             f"{s['model']:<10} {s['cem_iteration']:>3} "
