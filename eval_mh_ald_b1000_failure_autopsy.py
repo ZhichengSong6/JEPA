@@ -62,10 +62,12 @@ from eval_lowbudget_failure_autopsy import (
 from eval_b3000_paired_failure_analysis import (
     CrossTraceCEMSolver,
     _close_world,
-    _extract_variations,
     _normalized_to_raw,
-    _reset_physical,
-    _slice_info,
+)
+from pusht_exact_replay import (
+    load_dataset_reset_contexts,
+    load_goal_images,
+    reset_physical_exact,
 )
 from eval_pusht_horizon_directional import _encode
 
@@ -168,22 +170,6 @@ def _run_closed_loop(
     return model, solver, metrics, success, elapsed
 
 
-def _goal_image(env, start_state, goal_state, variations, seed):
-    _reset_physical(env, start_state, goal_state, variations, seed)
-    raw = env.unwrapped
-    info = {}
-    try:
-        info = raw._get_info()
-    except Exception:
-        pass
-    goal = info.get("goal", None)
-    if goal is None:
-        raw._set_state(np.asarray(goal_state, dtype=np.float64))
-        goal = np.asarray(raw.render())
-        raw._set_state(np.asarray(start_state, dtype=np.float64))
-    return np.asarray(goal)
-
-
 def _replay_population(
     env,
     start_state,
@@ -191,8 +177,7 @@ def _replay_population(
     normalized_candidates,
     action_scaler,
     action_block,
-    variations,
-    seed_base,
+    reset_context,
     need_images,
 ):
     raw_candidates = _normalized_to_raw(
@@ -207,12 +192,11 @@ def _replay_population(
     theta_deg = np.zeros(n, dtype=np.float64)
 
     for ci, acts in enumerate(raw_candidates):
-        _reset_physical(
+        reset_physical_exact(
             env,
             start_state,
             goal_state,
-            variations,
-            int(seed_base + ci),
+            reset_context,
         )
         raw = env.unwrapped
         obs = None
@@ -364,6 +348,13 @@ def run(cfg: DictConfig):
         dataset, eval_episodes, eval_start, cfg.eval.goal_offset_steps
     )
     process = _build_process(cfg, dataset)
+    reset_contexts = load_dataset_reset_contexts(dataset, eval_rows)
+    exact_goal_images = load_goal_images(
+        dataset,
+        eval_episodes,
+        eval_start,
+        cfg.eval.goal_offset_steps,
+    )
 
     print("============================================================")
     print("MH-ALD B=1000 FAILURE AUTOPSY")
@@ -447,22 +438,11 @@ def run(cfg: DictConfig):
                 )
                 goal_state = np.asarray(goal_states[env_i], dtype=np.float64)
 
-                solver_info = solve.get("solver_info")
-                info_one = (
-                    _slice_info(solver_info, li)
-                    if solver_info is not None
-                    else {}
+                reset_context = reset_contexts[env_i]
+                variation_names = list(
+                    reset_context.get("variation_names", [])
                 )
-                variations = _extract_variations(info_one)
-                variation_names = list(variations[0])
-
-                goal_image = _goal_image(
-                    replay_env,
-                    start_state,
-                    goal_state,
-                    variations,
-                    seed=910000 + 1000 * env_i + solve_idx,
-                )
+                goal_image = np.asarray(exact_goal_images[env_i])
                 zg = _encode(
                     model,
                     transform,
@@ -492,11 +472,7 @@ def run(cfg: DictConfig):
                         candidates,
                         process["action"],
                         int(cfg.plan_config.action_block),
-                        variations,
-                        seed_base=10000000
-                        + 100000 * env_i
-                        + 1000 * solve_idx
-                        + 100 * it,
+                        reset_context,
                         need_images=True,
                     )
                     phys_cost = replay["phys_cost"]
@@ -537,11 +513,7 @@ def run(cfg: DictConfig):
                         mean_after[None],
                         process["action"],
                         int(cfg.plan_config.action_block),
-                        variations,
-                        seed_base=20000000
-                        + 100000 * env_i
-                        + 1000 * solve_idx
-                        + 100 * it,
+                        reset_context,
                         need_images=False,
                     )
 
@@ -559,7 +531,11 @@ def run(cfg: DictConfig):
                         "cem_iteration": int(it),
                         "num_samples": int(len(candidates)),
                         "topk": int(cfg.solver.topk),
+                        "dataset_seed": reset_context.get("seed", None),
                         "variation_names": "|".join(variation_names),
+                        "variation_count": int(
+                            reset_context.get("variation_count", 0)
+                        ),
                         "solve_start_phys_cost": float(
                             _physical_cost(
                                 start_state[None], goal_state
@@ -828,7 +804,13 @@ def run(cfg: DictConfig):
                 if ceiling_manifest_path is not None
                 else None
             ),
-            "variation_restore": True,
+            "exact_dataset_reset_context": True,
+            "reset_context_protocol": (
+                "Every candidate in a case is reset with the SAME dataset "
+                "episode seed and stored variation.* values, then solve-start "
+                "state/goal are restored. Goal embedding uses the exact raw "
+                "dataset goal frame."
+            ),
             "physical_oracle_used_for_planning": False,
         },
         "closed_loop": {
