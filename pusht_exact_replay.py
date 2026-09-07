@@ -196,3 +196,55 @@ class LiveContextSolverPolicy(swm.policy.WorldModelPolicy):
         super().set_env(env)
         if hasattr(self.solver, "set_live_env"):
             self.solver.set_live_env(env)
+
+
+class VariationInjectedDataset:
+    """Dataset view that injects captured live variation values into load_chunk.
+
+    This makes stable_worldmodel.World.evaluate_from_dataset reset its NEW world
+    to the exact variation snapshots captured from the baseline world.
+    """
+
+    def __init__(self, base_dataset, reset_contexts):
+        self._base = base_dataset
+        self._contexts = list(reset_contexts)
+        names = sorted({
+            name
+            for ctx in self._contexts
+            for name in ctx.get("variation_names", [])
+        })
+        self._variation_names = names
+        self.column_names = list(base_dataset.column_names) + [
+            f"variation.{name}"
+            for name in names
+            if f"variation.{name}" not in base_dataset.column_names
+        ]
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+    def load_chunk(self, episodes_idx, start_steps, end_steps):
+        chunks = self._base.load_chunk(episodes_idx, start_steps, end_steps)
+        if len(chunks) != len(self._contexts):
+            raise RuntimeError(
+                "Injected variation context count mismatch: "
+                f"{len(self._contexts)} vs {len(chunks)}"
+            )
+        for ep, ctx in zip(chunks, self._contexts):
+            names = list(ctx.get("variation_names", []))
+            values = dict(ctx.get("variation_values", {}))
+            if not names:
+                continue
+            ref = ep.get("state", None)
+            if ref is None:
+                ref = next(iter(ep.values()))
+            t = int(ref.shape[0])
+            for name in names:
+                if name not in values:
+                    raise RuntimeError(
+                        f"Missing captured value for variation '{name}'"
+                    )
+                val = np.asarray(values[name])
+                arr = np.broadcast_to(val, (t, *val.shape)).copy()
+                ep[f"variation.{name}"] = arr
+        return chunks
