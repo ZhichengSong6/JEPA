@@ -84,7 +84,7 @@ def context_variations(context):
         elif dtype_name is not None:
             # Preserve scalar numpy dtype where the variation space has one.
             arr = np.asarray(value, dtype=np.dtype(dtype_name))
-            values[name] = arr.item() if arr.ndim == 0 else arr
+            values[name] = arr[()] if arr.ndim == 0 else arr
         else:
             values[name] = value
     return names, values
