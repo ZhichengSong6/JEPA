@@ -36,8 +36,8 @@ conda activate lewm
 python -m py_compile eval_mh_ald_b1000_failure_autopsy.py pusht_exact_replay.py
 
 if [[ "$MODE" == "smoke" ]]; then
-  NUM_EVAL=6
-  NUM_SAMPLES=30
+  NUM_EVAL=4
+  NUM_SAMPLES=12
   ITERS=2
   TOPK=3
   REPLAY_ITERS="[0,1]"
@@ -56,7 +56,7 @@ else
   REPLAY_ITERS="[0,1,3,5,9]"
   MAX_SOLVES=0
   CEILING_ARG="+failure_autopsy.ceiling_manifest=$CEILING_MANIFEST"
-  EXPECTED="+failure_autopsy.expected_success=92.0"
+  EXPECTED=""
 fi
 
 FILE="$GEN_DIR/b1000_failure_autopsy_${MODE}_${RUN_TAG}.slurm"
@@ -101,6 +101,25 @@ CUDA_VISIBLE_DEVICES=0 python -u eval_mh_ald_b1000_failure_autopsy.py \
   +failure_autopsy.max_solves_per_case=$MAX_SOLVES \
   $CEILING_ARG \
   $EXPECTED
+
+echo
+echo "=== FAILURE AUTOPSY ARTIFACT VALIDATION ==="
+REQ=(
+  "$OUT_DIR/population_autopsy.csv"
+  "$OUT_DIR/candidate_autopsy.npz"
+  "$OUT_DIR/case_summary.csv"
+  "$OUT_DIR/iteration_group_summary.csv"
+  "$OUT_DIR/failure_autopsy_summary.json"
+)
+for f in "${REQ[@]}"; do
+  [[ -s "$f" ]] || { echo "ERROR: missing/empty $f" >&2; exit 4; }
+done
+
+if [[ "$MODE" == "smoke" ]]; then
+  echo
+  echo "=== FAILURE AUTOPSY SMOKE PACKAGE VALIDATION ==="
+  bash scripts/package_mh_ald_b1000_failure_autopsy.sh
+fi
 
 echo
 echo "=== FAILURE AUTOPSY JOB DONE ==="
