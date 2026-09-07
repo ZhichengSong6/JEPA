@@ -65,7 +65,7 @@ from eval_b3000_paired_failure_analysis import (
     _normalized_to_raw,
 )
 from pusht_exact_replay import (
-    load_dataset_reset_contexts,
+    LiveVariationCapturePolicy,
     load_goal_images,
     reset_physical_exact,
 )
@@ -146,7 +146,7 @@ def _run_closed_loop(
     world = swm.World(**world_cfg, image_shape=(224, 224))
     plan_config = swm.PlanConfig(**cfg.plan_config)
     transform = {"pixels": img_transform(cfg), "goal": img_transform(cfg)}
-    policy = swm.policy.WorldModelPolicy(
+    policy = LiveVariationCapturePolicy(
         solver=solver,
         config=plan_config,
         process=process,
@@ -165,9 +165,15 @@ def _run_closed_loop(
     )
     elapsed = time.time() - t0
     success = np.asarray(metrics["episode_successes"], dtype=bool)
+    live_reset_contexts = policy.live_reset_contexts
     _close_world(world)
 
-    return model, solver, metrics, success, elapsed
+    if live_reset_contexts is None:
+        raise RuntimeError(
+            "Failed to capture live official-environment variations."
+        )
+
+    return model, solver, metrics, success, elapsed, live_reset_contexts
 
 
 def _replay_population(
@@ -348,22 +354,12 @@ def run(cfg: DictConfig):
         dataset, eval_episodes, eval_start, cfg.eval.goal_offset_steps
     )
     process = _build_process(cfg, dataset)
-    reset_contexts = load_dataset_reset_contexts(dataset, eval_rows)
     exact_goal_images = load_goal_images(
         dataset,
         eval_episodes,
         eval_start,
         cfg.eval.goal_offset_steps,
     )
-    seed_count = sum(int(x.get("seed_available", False)) for x in reset_contexts)
-    variation_counts = sorted(set(
-        int(x.get("variation_count", 0)) for x in reset_contexts
-    ))
-    print(
-        f"[exact-replay] dataset seeds available: {seed_count}/{len(reset_contexts)}; "
-        f"variation counts per case: {variation_counts}"
-    )
-
     print("============================================================")
     print("MH-ALD B=1000 FAILURE AUTOPSY")
     print(f"policy={mh_policy}")
@@ -379,8 +375,23 @@ def run(cfg: DictConfig):
     print("============================================================")
 
     t0 = time.time()
-    model, solver, metrics, success, closed_loop_seconds = _run_closed_loop(
+    (
+        model,
+        solver,
+        metrics,
+        success,
+        closed_loop_seconds,
+        reset_contexts,
+    ) = _run_closed_loop(
         cfg, dataset, process, mh_policy, eval_episodes, eval_start
+    )
+    variation_counts = sorted(set(
+        int(x.get("variation_count", 0)) for x in reset_contexts
+    ))
+    sources = sorted(set(str(x.get("source", "")) for x in reset_contexts))
+    print(
+        f"[exact-replay] live variation snapshots: {len(reset_contexts)}; "
+        f"variation counts per case: {variation_counts}; sources={sources}"
     )
 
     if expected_success is not None and abs(
@@ -812,12 +823,13 @@ def run(cfg: DictConfig):
                 if ceiling_manifest_path is not None
                 else None
             ),
-            "exact_dataset_reset_context": True,
+            "exact_live_reset_context": True,
             "reset_context_protocol": (
-                "Every candidate in a case is reset with the SAME dataset "
-                "episode seed and stored variation.* values, then solve-start "
-                "state/goal are restored. Goal embedding uses the exact raw "
-                "dataset goal frame."
+                "Official closed-loop World snapshots every live sub-env's "
+                "current variation_space values after reset. Every diagnostic "
+                "candidate in that case reuses the SAME captured variation "
+                "snapshot, then solve-start state/goal are restored. Goal "
+                "embedding uses the exact raw dataset goal frame."
             ),
             "physical_oracle_used_for_planning": False,
         },
