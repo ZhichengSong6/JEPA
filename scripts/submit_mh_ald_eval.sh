@@ -227,7 +227,7 @@ python -u scripts/summarize_cem_budget_sweep.py \
   --output-dir "$SUM_DIR" \
   --reference-label lewm \
   --reference-n 300 \
-  --reference-i 10 \
+  --reference-i 30 \
   --thresholds 80 90 91 94 95 100
 
 echo
