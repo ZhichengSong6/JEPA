@@ -34,11 +34,17 @@ conda activate lewm
 python -m py_compile eval_pusht_b1000_ceiling.py pusht_exact_replay.py
 
 if [[ "$MODE" == "smoke" ]]; then
-  NUM_EVAL=6
+  NUM_EVAL=4
+  NUM_SAMPLES=12
+  CEM_ITERS=2
+  TOPK=3
   MAX_CONTROLS=2
   EXPECTED=""
 else
   NUM_EVAL=100
+  NUM_SAMPLES=100
+  CEM_ITERS=10
+  TOPK=10
   MAX_CONTROLS=4
   EXPECTED="+ceiling.expected_baseline_success=92.0"
 fi
@@ -68,14 +74,17 @@ export OMP_NUM_THREADS=4
 OUT_DIR="$OUT_DIR"
 NUM_EVAL="$NUM_EVAL"
 MAX_CONTROLS="$MAX_CONTROLS"
+NUM_SAMPLES="$NUM_SAMPLES"
+CEM_ITERS="$CEM_ITERS"
+TOPK="$TOPK"
 EXPECTED="$EXPECTED"
 
 COMMON_ARGS=(
   --config-name=pusht.yaml
   seed=42
-  solver.num_samples=100
-  solver.n_steps=10
-  solver.topk=10
+  solver.num_samples="$NUM_SAMPLES"
+  solver.n_steps="$CEM_ITERS"
+  solver.topk="$TOPK"
   solver.batch_size=1
   eval.num_eval="$NUM_EVAL"
   eval.eval_budget=50
@@ -110,6 +119,27 @@ wait "\$P2"
 echo
 echo "=== PHASE 3: summarize ceilings ==="
 CUDA_VISIBLE_DEVICES=0 python -u eval_pusht_b1000_ceiling.py   "\${COMMON_ARGS[@]}"   +ceiling.phase=summary
+
+echo
+echo "=== PHASE 4: artifact validation ==="
+REQ=(
+  "$OUT_DIR/baseline.json"
+  "$OUT_DIR/encoder_oracle.json"
+  "$OUT_DIR/physical_oracle.json"
+  "$OUT_DIR/encoder_solver_diagnostics.csv"
+  "$OUT_DIR/physical_solver_diagnostics.csv"
+  "$OUT_DIR/ceiling_case_manifest.csv"
+  "$OUT_DIR/ceiling_summary.json"
+)
+for f in "${REQ[@]}"; do
+  [[ -s "$f" ]] || { echo "ERROR: missing/empty $f" >&2; exit 4; }
+done
+
+if [[ "$MODE" == "smoke" ]]; then
+  echo
+  echo "=== PHASE 5: smoke package validation ==="
+  bash scripts/package_mh_ald_b1000_ceiling.sh
+fi
 
 echo
 echo "=== CEILING JOB DONE ==="
