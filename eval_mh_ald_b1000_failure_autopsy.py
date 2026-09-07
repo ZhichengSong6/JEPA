@@ -348,6 +348,13 @@ def run(cfg: DictConfig):
         if it < 0 or it >= int(cfg.solver.n_steps):
             raise ValueError(f"Invalid replay iteration {it}")
 
+    # Resolve the mandatory world horizon exactly as in the validated autopsy
+    # scripts before constructing any World/OmegaConf container.
+    cfg.world.max_episode_steps = max(
+        2 * int(cfg.eval.eval_budget),
+        int(cfg.eval.goal_offset_steps) + 1,
+    )
+
     dataset = get_dataset(cfg, cfg.eval.dataset_name)
     _, eval_rows, eval_episodes, eval_start = _prepare_eval_rows(cfg, dataset)
     start_states, goal_states = _load_start_goal_states(
