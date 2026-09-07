@@ -131,8 +131,8 @@ REQ=(
   "$OUT_DIR/ceiling_case_manifest.csv"
   "$OUT_DIR/ceiling_summary.json"
 )
-for f in "${REQ[@]}"; do
-  [[ -s "$f" ]] || { echo "ERROR: missing/empty $f" >&2; exit 4; }
+for f in "\${REQ[@]}"; do
+  [[ -s "\$f" ]] || { echo "ERROR: missing/empty \$f" >&2; exit 4; }
 done
 
 if [[ "$MODE" == "smoke" ]]; then
