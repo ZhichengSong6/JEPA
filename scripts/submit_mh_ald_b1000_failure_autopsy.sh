@@ -111,8 +111,8 @@ REQ=(
   "$OUT_DIR/iteration_group_summary.csv"
   "$OUT_DIR/failure_autopsy_summary.json"
 )
-for f in "${REQ[@]}"; do
-  [[ -s "$f" ]] || { echo "ERROR: missing/empty $f" >&2; exit 4; }
+for f in "\${REQ[@]}"; do
+  [[ -s "\$f" ]] || { echo "ERROR: missing/empty \$f" >&2; exit 4; }
 done
 
 if [[ "$MODE" == "smoke" ]]; then
