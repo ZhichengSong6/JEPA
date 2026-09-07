@@ -532,6 +532,14 @@ def run(cfg: DictConfig):
         eval_start,
         cfg.eval.goal_offset_steps,
     )
+    seed_count = sum(int(x.get("seed_available", False)) for x in reset_contexts)
+    variation_counts = sorted(set(
+        int(x.get("variation_count", 0)) for x in reset_contexts
+    ))
+    print(
+        f"[exact-replay] dataset seeds available: {seed_count}/{len(reset_contexts)}; "
+        f"variation counts per case: {variation_counts}"
+    )
 
     baseline_path = outdir / "baseline.json"
 
