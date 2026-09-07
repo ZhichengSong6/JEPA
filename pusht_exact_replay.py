@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+import stable_worldmodel as swm
 
 
 def _np(x):
@@ -103,3 +104,73 @@ def load_goal_images(dataset, episodes, start_steps, goal_offset):
             px = np.moveaxis(px, 0, -1)
         images.append(np.asarray(px))
     return images
+
+
+def capture_live_reset_contexts(vector_env):
+    """Snapshot the ACTUAL current variation values from live official envs.
+
+    This is the authoritative fallback when the evaluation dataset has neither
+    seed nor variation.* columns. It must be called only after the World has
+    already reset to the episode(s), i.e. from the first solver call.
+    """
+    envs = getattr(vector_env, "envs", None)
+    if envs is None:
+        base = getattr(vector_env, "unwrapped", vector_env)
+        envs = getattr(base, "envs", None)
+    if envs is None:
+        raise RuntimeError(
+            "Cannot access live sub-environments for exact variation snapshot."
+        )
+
+    contexts = []
+    for i, env in enumerate(envs):
+        raw = env.unwrapped
+        vspace = getattr(raw, "variation_space", None)
+        if vspace is None:
+            contexts.append({
+                "seed": None,
+                "variation_names": [],
+                "variation_values": {},
+                "seed_available": False,
+                "variation_count": 0,
+                "source": "live_env_no_variation_space",
+            })
+            continue
+
+        names = list(vspace.names())
+        values = {}
+        for name in names:
+            subspace = swm.utils.get_in(vspace, name.split("."))
+            val = getattr(subspace, "value", None)
+            if val is None:
+                raise RuntimeError(
+                    f"Live variation '{name}' for env {i} has no current value."
+                )
+            values[name] = _scalar(val)
+
+        contexts.append({
+            "seed": None,
+            "variation_names": names,
+            "variation_values": values,
+            "seed_available": False,
+            "variation_count": len(values),
+            "source": "live_env_snapshot",
+        })
+
+    return contexts
+
+
+def load_dataset_reset_contexts_optional(dataset, eval_rows):
+    """Use dataset reset metadata when available, otherwise return None.
+
+    For this PushT dataset, official evaluation may expose neither seed nor
+    variation.* columns. In that case exact replay must snapshot the live env
+    after official reset rather than inventing a deterministic seed.
+    """
+    rows = dataset.get_row_data(np.asarray(eval_rows))
+    columns = list(dataset.column_names)
+    has_seed = "seed" in rows
+    variation_cols = [c for c in columns if str(c).startswith("variation.")]
+    if not has_seed and not variation_cols:
+        return None
+    return load_dataset_reset_contexts(dataset, eval_rows)
