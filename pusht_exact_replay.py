@@ -42,9 +42,14 @@ def load_dataset_reset_contexts(dataset, eval_rows):
             seed = int(_scalar(seeds[i]))
 
         values = {}
+        dtypes = {}
         for col in variation_cols:
             key = str(col).removeprefix("variation.")
             values[key] = _scalar(rows[col][i])
+            try:
+                dtypes[key] = str(np.asarray(_np(rows[col][i])).dtype)
+            except Exception:
+                pass
 
         if seed is None and not values:
             raise RuntimeError(
@@ -56,6 +61,7 @@ def load_dataset_reset_contexts(dataset, eval_rows):
             "seed": seed,
             "variation_names": list(values.keys()),
             "variation_values": values,
+            "variation_dtypes": dtypes,
             "seed_available": seed is not None,
             "variation_count": len(values),
         })
@@ -63,10 +69,25 @@ def load_dataset_reset_contexts(dataset, eval_rows):
 
 
 def context_variations(context):
-    return (
-        list(context.get("variation_names", [])),
-        dict(context.get("variation_values", {})),
-    )
+    names = list(context.get("variation_names", []))
+    raw_values = dict(context.get("variation_values", {}))
+    dtypes = dict(context.get("variation_dtypes", {}))
+    values = {}
+    for name in names:
+        value = raw_values[name]
+        dtype_name = dtypes.get(name, None)
+        if isinstance(value, list):
+            values[name] = np.asarray(
+                value,
+                dtype=np.dtype(dtype_name) if dtype_name else None,
+            )
+        elif dtype_name is not None:
+            # Preserve scalar numpy dtype where the variation space has one.
+            arr = np.asarray(value, dtype=np.dtype(dtype_name))
+            values[name] = arr.item() if arr.ndim == 0 else arr
+        else:
+            values[name] = value
+    return names, values
 
 
 def reset_physical_exact(env, state, goal, context):
@@ -131,6 +152,7 @@ def capture_live_reset_contexts(vector_env):
                 "seed": None,
                 "variation_names": [],
                 "variation_values": {},
+                "variation_dtypes": {},
                 "seed_available": False,
                 "variation_count": 0,
                 "source": "live_env_no_variation_space",
@@ -139,6 +161,7 @@ def capture_live_reset_contexts(vector_env):
 
         names = list(vspace.names())
         values = {}
+        dtypes = {}
         for name in names:
             subspace = swm.utils.get_in(vspace, name.split("."))
             val = getattr(subspace, "value", None)
@@ -147,11 +170,15 @@ def capture_live_reset_contexts(vector_env):
                     f"Live variation '{name}' for env {i} has no current value."
                 )
             values[name] = _scalar(val)
+            dtype = getattr(subspace, "dtype", None)
+            if dtype is not None:
+                dtypes[name] = str(np.dtype(dtype))
 
         contexts.append({
             "seed": None,
             "variation_names": names,
             "variation_values": values,
+            "variation_dtypes": dtypes,
             "seed_available": False,
             "variation_count": len(values),
             "source": "live_env_snapshot",
@@ -231,8 +258,7 @@ class VariationInjectedDataset:
                 f"{len(self._contexts)} vs {len(chunks)}"
             )
         for ep, ctx in zip(chunks, self._contexts):
-            names = list(ctx.get("variation_names", []))
-            values = dict(ctx.get("variation_values", {}))
+            names, values = context_variations(ctx)
             if not names:
                 continue
             ref = ep.get("state", None)
