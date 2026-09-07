@@ -31,7 +31,7 @@ ln -sfn "$OUT_DIR" "$REPO/outputs/mh_ald_b1000_ceiling_latest"
 cd "$REPO"
 source "$CONDA_SH"
 conda activate lewm
-python -m py_compile eval_pusht_b1000_ceiling.py
+python -m py_compile eval_pusht_b1000_ceiling.py pusht_exact_replay.py
 
 if [[ "$MODE" == "smoke" ]]; then
   NUM_EVAL=6
