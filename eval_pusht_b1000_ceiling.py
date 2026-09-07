@@ -46,11 +46,11 @@ from eval_lowbudget_failure_autopsy import (
     _physical_cost,
     _prepare_eval_rows,
 )
-from eval_b3000_paired_failure_analysis import (
-    _extract_variations,
-    _normalized_to_raw,
-    _reset_physical,
-    _slice_info,
+from eval_b3000_paired_failure_analysis import _normalized_to_raw
+from pusht_exact_replay import (
+    load_dataset_reset_contexts,
+    load_goal_images,
+    reset_physical_exact,
 )
 from eval_pusht_horizon_directional import _encode
 
@@ -169,6 +169,8 @@ class OracleCEMSolver:
         device="cuda",
         seed=42,
         model_batch_size=64,
+        reset_contexts=None,
+        goal_images=None,
     ):
         if mode not in {"encoder", "physical"}:
             raise ValueError(mode)
@@ -191,6 +193,9 @@ class OracleCEMSolver:
         self.goal_cache = {}
         self.solve_count = 0
         self.diagnostic_rows = []
+        self.reset_contexts = list(reset_contexts or [])
+        self.goal_images = list(goal_images or [])
+        self._env_id_to_context_index = {}
 
     def configure(self, *, action_space: gym.Space, n_envs: int, config):
         self._action_space = action_space
@@ -263,34 +268,43 @@ class OracleCEMSolver:
             gt = self.state_scaler.inverse_transform(gt)
         return st.astype(np.float64), gt.astype(np.float64)
 
-    def _goal_latent(self, info_one, env_id, state, goal, variations):
-        if env_id in self.goal_cache:
-            return self.goal_cache[env_id]
-        _reset_physical(self.env, state, goal, variations, self.seed + env_id)
-        raw = self.env.unwrapped
-        info = {}
-        try:
-            info = raw._get_info()
-        except Exception:
-            pass
-        goal_image = info.get("goal", None)
-        if goal_image is None:
-            raw._set_state(np.asarray(goal, dtype=np.float64))
-            goal_image = np.asarray(raw.render())
-            raw._set_state(np.asarray(state, dtype=np.float64))
+    def _context_index(self, info_dict, env_i):
+        env_id = self._env_id(info_dict, env_i)
+        if not self._env_id_to_context_index:
+            total_envs = len(next(iter(info_dict.values())))
+            if len(self.reset_contexts) != total_envs:
+                raise RuntimeError(
+                    "Reset-context count does not match first oracle solve: "
+                    f"{len(self.reset_contexts)} vs {total_envs}"
+                )
+            for j in range(total_envs):
+                self._env_id_to_context_index[
+                    self._env_id(info_dict, j)
+                ] = j
+        if env_id not in self._env_id_to_context_index:
+            raise RuntimeError(f"Unknown oracle env id {env_id}")
+        return self._env_id_to_context_index[env_id]
+
+    def _goal_latent(self, context_index):
+        if context_index in self.goal_cache:
+            return self.goal_cache[context_index]
+        if context_index >= len(self.goal_images):
+            raise RuntimeError(
+                f"Missing exact dataset goal image for context {context_index}"
+            )
         z = _encode(
             self.encoder_model,
             self.transform,
-            [np.asarray(goal_image)],
+            [np.asarray(self.goal_images[context_index])],
             self.device,
             self.model_batch_size,
         )[0].detach()
-        self.goal_cache[env_id] = z
+        self.goal_cache[context_index] = z
         return z
 
     def _score_population(self, info_dict, env_i, candidates, raw_state, goal_state):
-        info_one = _slice_info(info_dict, env_i)
-        variations = _extract_variations(info_one)
+        context_index = self._context_index(info_dict, env_i)
+        reset_context = self.reset_contexts[context_index]
         raw_candidates = _normalized_to_raw(
             candidates.detach().cpu().numpy(),
             self.action_scaler,
@@ -304,12 +318,11 @@ class OracleCEMSolver:
 
         env_id = self._env_id(info_dict, env_i)
         for ci, acts in enumerate(raw_candidates):
-            _reset_physical(
+            reset_physical_exact(
                 self.env,
                 raw_state,
                 goal_state,
-                variations,
-                self.seed + 100003 * env_id + ci,
+                reset_context,
             )
             raw = self.env.unwrapped
             obs = None
@@ -324,9 +337,7 @@ class OracleCEMSolver:
         if self.mode == "physical":
             score = np.asarray(phys_cost, dtype=np.float64)
         else:
-            zg = self._goal_latent(
-                info_one, env_id, raw_state, goal_state, variations
-            )
+            zg = self._goal_latent(context_index)
             zr = _encode(
                 self.encoder_model,
                 self.transform,
@@ -388,6 +399,12 @@ class OracleCEMSolver:
                     "selected_phys_success": bool(phys_success[selected]),
                     "selected_phys_cost": float(phys_cost[selected]),
                     "oracle_best_phys_cost": float(phys_cost[oracle_best]),
+                    "dataset_seed": self.reset_contexts[
+                        self._context_index(info_dict, env_i)
+                    ].get("seed", None),
+                    "variation_count": int(self.reset_contexts[
+                        self._context_index(info_dict, env_i)
+                    ].get("variation_count", 0)),
                 })
 
             vals, inds = torch.topk(
@@ -415,6 +432,8 @@ def _run_oracle(
     eval_episodes,
     eval_start,
     output_dir,
+    reset_contexts,
+    goal_images,
 ):
     device = torch.device(str(cfg.solver.device))
     model = swm.policy.AutoCostModel(str(encoder_policy)).to(device).eval()
@@ -435,6 +454,8 @@ def _run_oracle(
         device=str(cfg.solver.device),
         seed=int(cfg.seed),
         model_batch_size=int(cfg.get("ceiling", {}).get("model_batch_size", 64)),
+        reset_contexts=reset_contexts,
+        goal_images=goal_images,
     )
 
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
@@ -504,6 +525,13 @@ def run(cfg: DictConfig):
         dataset, eval_episodes, eval_start, cfg.eval.goal_offset_steps
     )
     process = _build_process(cfg, dataset)
+    reset_contexts = load_dataset_reset_contexts(dataset, eval_rows)
+    exact_goal_images = load_goal_images(
+        dataset,
+        eval_episodes,
+        eval_start,
+        cfg.eval.goal_offset_steps,
+    )
 
     baseline_path = outdir / "baseline.json"
 
@@ -576,6 +604,8 @@ def run(cfg: DictConfig):
         print("Oracle information is diagnostic only.")
         print("============================================================")
 
+        subset_contexts = [reset_contexts[int(i)] for i in selected]
+        subset_goal_images = [exact_goal_images[int(i)] for i in selected]
         result = _run_oracle(
             cfg,
             dataset,
@@ -585,6 +615,8 @@ def run(cfg: DictConfig):
             subset_ep,
             subset_start,
             outdir,
+            subset_contexts,
+            subset_goal_images,
         )
         result["selected_eval_indices"] = selected.tolist()
         path = outdir / f"{phase}_oracle.json"
@@ -677,6 +709,12 @@ def run(cfg: DictConfig):
             ),
         },
         "target_success_rate": target,
+        "exact_dataset_reset_context": True,
+        "reset_context_protocol": (
+            "Every oracle candidate is replayed with the SAME dataset episode "
+            "seed and stored variation.* values for that case; encoder-oracle "
+            "goal embedding uses the exact raw dataset goal frame."
+        ),
         "encoder_oracle_reaches_target": bool(enc_ceiling >= target),
         "physical_oracle_reaches_target": bool(phy_ceiling >= target),
         "control_retention": {
