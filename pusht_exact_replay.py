@@ -174,3 +174,25 @@ def load_dataset_reset_contexts_optional(dataset, eval_rows):
     if not has_seed and not variation_cols:
         return None
     return load_dataset_reset_contexts(dataset, eval_rows)
+
+
+class LiveVariationCapturePolicy(swm.policy.WorldModelPolicy):
+    """WorldModelPolicy that snapshots live variations before first planning call."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.live_reset_contexts = None
+
+    def get_action(self, info_dict, **kwargs):
+        if self.live_reset_contexts is None:
+            self.live_reset_contexts = capture_live_reset_contexts(self.env)
+        return super().get_action(info_dict, **kwargs)
+
+
+class LiveContextSolverPolicy(swm.policy.WorldModelPolicy):
+    """WorldModelPolicy that gives the live env to solvers needing exact replay."""
+
+    def set_env(self, env):
+        super().set_env(env)
+        if hasattr(self.solver, "set_live_env"):
+            self.solver.set_live_env(env)
