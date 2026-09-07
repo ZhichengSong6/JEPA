@@ -115,9 +115,6 @@ def _run_mh_baseline(cfg, dataset, process, policy_name, eval_episodes, eval_sta
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
     world_cfg["num_envs"] = int(len(eval_episodes))
     world_cfg["max_episode_steps"] = 2 * int(cfg.eval.eval_budget)
-    injected_dataset = VariationInjectedDataset(
-        dataset, reset_contexts
-    )
     world = swm.World(**world_cfg, image_shape=(224, 224))
 
     model = swm.policy.AutoCostModel(str(policy_name)).to("cuda").eval()
@@ -138,7 +135,7 @@ def _run_mh_baseline(cfg, dataset, process, policy_name, eval_episodes, eval_sta
 
     t0 = time.time()
     metrics = world.evaluate_from_dataset(
-        injected_dataset,
+        dataset,
         start_steps=np.asarray(eval_start).tolist(),
         goal_offset_steps=int(cfg.eval.goal_offset_steps),
         eval_budget=int(cfg.eval.eval_budget),
@@ -471,6 +468,9 @@ def _run_oracle(
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
     world_cfg["num_envs"] = int(len(eval_episodes))
     world_cfg["max_episode_steps"] = 2 * int(cfg.eval.eval_budget)
+    injected_dataset = VariationInjectedDataset(
+        dataset, reset_contexts
+    )
     world = swm.World(**world_cfg, image_shape=(224, 224))
     plan_config = swm.PlanConfig(**cfg.plan_config)
     transform = {"pixels": img_transform(cfg), "goal": img_transform(cfg)}
@@ -484,7 +484,7 @@ def _run_oracle(
 
     t0 = time.time()
     metrics = world.evaluate_from_dataset(
-        dataset,
+        injected_dataset,
         start_steps=np.asarray(eval_start).tolist(),
         goal_offset_steps=int(cfg.eval.goal_offset_steps),
         eval_budget=int(cfg.eval.eval_budget),
