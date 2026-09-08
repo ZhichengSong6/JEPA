@@ -646,6 +646,7 @@ def main():
                             "anchor_index": int(ai),
                             "dataset_row": int(row),
                             "replay_good": bool(replay_good),
+                            "center_contact": bool(center_contact),
                             "position": int(p),
                             "direction": int(d),
                             "horizon_index": int(h),
@@ -705,6 +706,18 @@ def main():
 
     good_response = [r for r in response_rows if r["replay_good"]]
     good_anchor = [r for r in anchor_rows if r["replay_good"]]
+    good_contact_response = [
+        r for r in good_response if r["center_contact"]
+    ]
+    good_contact_anchor = [
+        r for r in good_anchor if r["center_contact"]
+    ]
+    good_no_contact_response = [
+        r for r in good_response if not r["center_contact"]
+    ]
+    good_no_contact_anchor = [
+        r for r in good_anchor if not r["center_contact"]
+    ]
 
     by_offset = {}
     for off in range(int(args.horizon)):
@@ -741,6 +754,14 @@ def main():
             "response": _aggregate_response(good_response),
             "anchor": _aggregate_anchor(good_anchor),
         },
+        "replay_good_contact": {
+            "response": _aggregate_response(good_contact_response),
+            "anchor": _aggregate_anchor(good_contact_anchor),
+        },
+        "replay_good_no_contact": {
+            "response": _aggregate_response(good_no_contact_response),
+            "anchor": _aggregate_anchor(good_no_contact_anchor),
+        },
         "replay_good_by_horizon_from_perturb": by_offset,
         "replay_good_by_position": by_position,
         "protocol_notes": [
@@ -759,8 +780,11 @@ def main():
     summary_path.write_text(json.dumps(_jsonable(summary), indent=2))
 
     rg = summary["replay_good"]
+    rgc = summary["replay_good_contact"]
     print("\n===== TEACHER RESPONSE ORACLE SUMMARY (REPLAY-GOOD) =====")
     print(json.dumps(_jsonable(rg), indent=2))
+    print("\n===== REPLAY-GOOD + CONTACT =====")
+    print(json.dumps(_jsonable(rgc), indent=2))
     print(
         f"latent_frame_max_abs={frame_max_abs:.3e} "
         f"replay_good={len(good_anchor)}/{len(anchor_rows)}"
