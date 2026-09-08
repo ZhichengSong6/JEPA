@@ -535,6 +535,7 @@ def main():
 
             oracle_images = []
             final_states = []
+            candidate_contacts = []
             center_states = None
             center_contact = False
             for ci, cand in enumerate(candidates_raw):
@@ -547,6 +548,7 @@ def main():
                     args.action_block,
                 )
                 final_states.append(states_h[-1])
+                candidate_contacts.append(bool(contact))
                 oracle_images.extend(images_h)
                 if ci == 0:
                     center_states = states_h
@@ -647,6 +649,10 @@ def main():
                             "dataset_row": int(row),
                             "replay_good": bool(replay_good),
                             "center_contact": bool(center_contact),
+                            "pair_contact": bool(
+                                candidate_contacts[ip]
+                                or candidate_contacts[im]
+                            ),
                             "position": int(p),
                             "direction": int(d),
                             "horizon_index": int(h),
@@ -707,13 +713,13 @@ def main():
     good_response = [r for r in response_rows if r["replay_good"]]
     good_anchor = [r for r in anchor_rows if r["replay_good"]]
     good_contact_response = [
-        r for r in good_response if r["center_contact"]
+        r for r in good_response if r["pair_contact"]
     ]
     good_contact_anchor = [
         r for r in good_anchor if r["center_contact"]
     ]
     good_no_contact_response = [
-        r for r in good_response if not r["center_contact"]
+        r for r in good_response if not r["pair_contact"]
     ]
     good_no_contact_anchor = [
         r for r in good_anchor if not r["center_contact"]
