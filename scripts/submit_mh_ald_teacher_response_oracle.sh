@@ -93,20 +93,24 @@ for f in "\${REQ[@]}"; do
   [[ -s "\$f" ]] || { echo "ERROR: missing/empty \$f" >&2; exit 4; }
 done
 
-python - <<'PY'
+OUT_DIR_ENV="$OUT_DIR" python - <<'PY'
 import json
+import os
 from pathlib import Path
-p = Path("$OUT_DIR") / "summary.json"
+p = Path(os.environ["OUT_DIR_ENV"]) / "summary.json"
 s = json.loads(p.read_text())
 mx = float(s["latent_frame_max_abs_teacher_vs_student"])
 good = int(s["replay_good"]["anchor"]["replay_endpoint_factor_error"]["count"])
+contact = int(s["replay_good_contact"]["anchor"]["replay_endpoint_factor_error"]["count"])
 total = int(s["all"]["anchor"]["replay_endpoint_factor_error"]["count"])
 print(f"[teacher-response] latent-frame max abs={mx:.3e}")
-print(f"[teacher-response] replay-good anchors={good}/{total}")
+print(f"[teacher-response] replay-good anchors={good}/{total}; contact={contact}")
 if mx > 2e-5:
     raise SystemExit("teacher/student latent frame mismatch")
 if total <= 0:
     raise SystemExit("no anchors evaluated")
+if good <= 0:
+    raise SystemExit("no replay-good anchors; diagnostic is not qualified")
 PY
 
 if [[ "$MODE" == "smoke" ]]; then
