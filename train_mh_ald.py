@@ -66,6 +66,49 @@ def _count_parameters(module):
     return total, trainable
 
 
+def _assert_same_visual_latent_frame(student, teacher, atol: float = 1e-7) -> None:
+    """Require student/teacher encoder+projector to define one fixed frame.
+
+    MH-ALD feeds the student's frozen visual embeddings into both predictor
+    rollouts.  A replacement teacher is therefore valid only when its
+    observation-side encoder/projector are numerically identical to the
+    student's frozen frame.
+    """
+    worst = 0.0
+    worst_name = None
+    for prefix, s_mod, t_mod in (
+        ("encoder", student.encoder, teacher.encoder),
+        ("projector", student.projector, teacher.projector),
+    ):
+        s_state = s_mod.state_dict()
+        t_state = t_mod.state_dict()
+        if s_state.keys() != t_state.keys():
+            raise RuntimeError(
+                f"Student/teacher {prefix} state_dict keys differ."
+            )
+        for name in s_state:
+            s = s_state[name].detach().float().cpu()
+            t = t_state[name].detach().float().cpu()
+            if s.shape != t.shape:
+                raise RuntimeError(
+                    f"Student/teacher visual frame shape mismatch at "
+                    f"{prefix}.{name}: {tuple(s.shape)} vs {tuple(t.shape)}"
+                )
+            diff = float((s - t).abs().max()) if s.numel() else 0.0
+            if diff > worst:
+                worst = diff
+                worst_name = f"{prefix}.{name}"
+    print(
+        "Student/teacher frozen visual-frame check: "
+        f"max_abs={worst:.3e} at {worst_name}"
+    )
+    if worst > float(atol):
+        raise RuntimeError(
+            "Replacement teacher does not share the student's frozen visual "
+            f"latent frame: max_abs={worst:.3e} > atol={atol:.1e}"
+        )
+
+
 @hydra.main(
     version_base=None,
     config_path="./config/train",
@@ -145,6 +188,8 @@ def run(cfg):
     teacher = _load_policy_model(cfg.mh_ald.teacher_policy)
     teacher.eval()
     teacher.requires_grad_(False)
+
+    _assert_same_visual_latent_frame(student, teacher)
 
     student_action_dim = student.action_encoder.patch_embed.in_channels
     teacher_action_dim = teacher.action_encoder.patch_embed.in_channels
