@@ -23,7 +23,10 @@ import torch
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
-from anchored_local_dynamics import mh_ald_forward
+from anchored_local_dynamics import (
+    cem_aligned_mh_ald_forward,
+    mh_ald_forward,
+)
 from module import SIGReg
 from utils import ModelObjectCallBack, get_column_normalizer, get_img_preprocessor
 
@@ -223,6 +226,31 @@ def run(cfg):
     print("Frozen: encoder + projector (+ optional factor heads)")
     print("Trainable: action_encoder + predictor + pred_proj")
 
+    cem_aligned_enabled = bool(
+        cfg.mh_ald.get("cem_aligned", {}).get("enabled", False)
+    )
+    selected_forward = (
+        cem_aligned_mh_ald_forward
+        if cem_aligned_enabled
+        else mh_ald_forward
+    )
+    print(
+        "MH-ALD forward mode: "
+        + ("CEM-aligned population-weighted" if cem_aligned_enabled else "standard")
+    )
+    if cem_aligned_enabled:
+        ccfg = cfg.mh_ald.cem_aligned
+        print(
+            "CEM-aligned config: "
+            f"center_radius={float(ccfg.center_radius):.4f} "
+            f"probe_radius={float(cfg.mh_ald.perturb_radius):.4f} "
+            f"directions_per_position={int(cfg.mh_ald.directions_per_position)} "
+            f"population={2 * int(cfg.mh_ald.rollout_horizon) * int(cfg.mh_ald.directions_per_position)} "
+            f"elite={float(ccfg.elite_fraction):.2f}@{float(ccfg.elite_weight):.1f}x "
+            f"near={float(ccfg.near_elite_fraction):.2f}@{float(ccfg.near_elite_weight):.1f}x "
+            f"base={float(ccfg.base_weight):.1f}x"
+        )
+
     optimizers = {
         "model_opt": {
             "modules": "model",
@@ -239,7 +267,7 @@ def run(cfg):
         # field maintains compatibility with the existing spt.Module setup.
         sigreg=SIGReg(**cfg.loss.sigreg.kwargs),
         forward=partial(
-            mh_ald_forward,
+            selected_forward,
             cfg=cfg,
             action_mean=action_mean,
             action_std=action_std,
