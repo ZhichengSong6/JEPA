@@ -92,7 +92,9 @@ mh_ald:
 
   # Chunking keeps peak memory close to the existing MH-ALD path; runtime rises
   # because we intentionally evaluate a larger training population.
-  probes_per_chunk: 2
+  # Larger chunk reduces repeated rollout-call overhead.  Smoke validation on
+  # 4090 is required before formal; scientific candidate population is unchanged.
+  probes_per_chunk: 5
 
   cem_aligned:
     enabled: true
