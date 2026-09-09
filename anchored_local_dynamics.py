@@ -726,14 +726,20 @@ def _cem_tail_pair_weights(
     near_elite_weight,
     base_weight,
 ):
-    """Rank anchored terminal candidates and weight promising probe PAIRS.
+    """Rank symmetric ALD directions by their best anchored terminal candidate.
 
-    Candidate ranking itself is individual, as in CEM.  For the ALD loss we use
-    the maximum tier weight of the +/- pair for both signs.  This keeps the
-    symmetric ALD response objective intact: once either side of a local
-    direction is CEM-relevant, both sides are trained with the same weight.
+    CEM ranks individual candidates, but the MH-ALD regression must preserve a
+    +/- symmetric pair to calibrate a response direction.  We therefore:
+      1) compute individual anchored terminal costs C+ and C-;
+      2) define one planning-relevance score per symmetric direction as
+             C_pair = min(C+, C-)
+         because the direction matters when either sign contains a promising
+         candidate;
+      3) rank the P symmetric directions themselves and assign EXACT pair-level
+         tiers: top elite_fraction, next near_elite_fraction, rest base.
 
-    Returns pair weights [B,P], individual candidate costs [B,2P], and ranks.
+    This avoids the previous "individual tier -> max pair weight" expansion,
+    which could accidentally mark most directions as elite/near-elite.
     """
     if not (0.0 < elite_fraction <= 1.0):
         raise ValueError(
@@ -754,45 +760,52 @@ def _cem_tail_pair_weights(
     goal = terminal_goal[:, None, :]
     plus_cost = (target_plus[:, :, -1] - goal).pow(2).mean(dim=-1)
     minus_cost = (target_minus[:, :, -1] - goal).pow(2).mean(dim=-1)
-    costs = torch.cat([plus_cost, minus_cost], dim=1).detach()
+    plus_cost = plus_cost.detach()
+    minus_cost = minus_cost.detach()
 
-    b, m = costs.shape
-    order = torch.argsort(costs, dim=1)
-    ranks = torch.empty_like(order)
-    rank_values = torch.arange(m, device=costs.device)[None, :].expand(b, -1)
-    ranks.scatter_(1, order, rank_values)
+    candidate_costs = torch.cat([plus_cost, minus_cost], dim=1)
+    pair_costs = torch.minimum(plus_cost, minus_cost)
 
-    elite_n = max(1, int(round(float(elite_fraction) * m)))
+    b, p = pair_costs.shape
+    order = torch.argsort(pair_costs, dim=1)
+    pair_ranks = torch.empty_like(order)
+    rank_values = torch.arange(
+        p, device=pair_costs.device
+    )[None, :].expand(b, -1)
+    pair_ranks.scatter_(1, order, rank_values)
+
+    # Use ceil for the elite set so a nonzero fraction always receives the
+    # requested emphasis; near_end is the cumulative elite+near boundary.
+    import math
+    elite_n = max(1, int(math.ceil(float(elite_fraction) * p)))
     near_end = max(
         elite_n,
-        int(round(float(elite_fraction + near_elite_fraction) * m)),
+        int(math.ceil(
+            float(elite_fraction + near_elite_fraction) * p
+        )),
     )
-    near_end = min(m, near_end)
+    near_end = min(p, near_end)
 
-    individual_weights = torch.full_like(costs, float(base_weight))
+    pair_weights = torch.full_like(pair_costs, float(base_weight))
     if near_end > elite_n:
-        individual_weights = torch.where(
-            ranks < near_end,
-            torch.full_like(individual_weights, float(near_elite_weight)),
-            individual_weights,
+        pair_weights = torch.where(
+            pair_ranks < near_end,
+            torch.full_like(pair_weights, float(near_elite_weight)),
+            pair_weights,
         )
-    individual_weights = torch.where(
-        ranks < elite_n,
-        torch.full_like(individual_weights, float(elite_weight)),
-        individual_weights,
+    pair_weights = torch.where(
+        pair_ranks < elite_n,
+        torch.full_like(pair_weights, float(elite_weight)),
+        pair_weights,
     )
-
-    p = plus_cost.shape[1]
-    plus_w = individual_weights[:, :p]
-    minus_w = individual_weights[:, p:]
-    pair_weights = torch.maximum(plus_w, minus_w)
 
     return (
         pair_weights.detach(),
-        costs,
-        ranks.detach(),
-        plus_cost.detach(),
-        minus_cost.detach(),
+        candidate_costs.detach(),
+        pair_ranks.detach(),
+        pair_costs.detach(),
+        plus_cost,
+        minus_cost,
     )
 
 
@@ -1284,7 +1297,8 @@ def cem_aligned_mh_ald_forward(self, batch, stage, cfg, action_mean, action_std)
     (
         pair_weights,
         candidate_costs,
-        candidate_ranks,
+        pair_ranks,
+        pair_costs,
         plus_cost,
         minus_cost,
     ) = _cem_tail_pair_weights(
@@ -1441,10 +1455,13 @@ def cem_aligned_mh_ald_forward(self, batch, stage, cfg, action_mean, action_std)
         f"{stage}/cem_mh_candidate_cost_mean": (
             candidate_costs.mean().detach()
         ),
+        f"{stage}/cem_mh_pair_cost_mean": (
+            pair_costs.mean().detach()
+        ),
         f"{stage}/cem_mh_plus_cost_mean": plus_cost.mean().detach(),
         f"{stage}/cem_mh_minus_cost_mean": minus_cost.mean().detach(),
-        f"{stage}/cem_mh_rank_mean": (
-            candidate_ranks.float().mean().detach()
+        f"{stage}/cem_mh_pair_rank_mean": (
+            pair_ranks.float().mean().detach()
         ),
     }
 
