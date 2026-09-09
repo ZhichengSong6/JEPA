@@ -1,0 +1,110 @@
+defaults:
+  - _self_
+  - data: pusht_mh_ald
+
+# CEM-aligned Multi-Horizon Anchored Local Dynamics.
+#
+# Controlled against formal MH-ALD:
+#   student init / frozen visual frame / teacher / dataset / optimizer /
+#   TF weight / rollout weight / MH weight / horizon / probe radius
+# are unchanged.
+#
+# Scientific changes:
+#   1) train around a bounded imperfect planning center rather than exactly U0;
+#   2) use a 40-candidate local population (5 positions x 4 dirs x +/-);
+#   3) rank candidates with anchored teacher terminal latent cost;
+#   4) upweight symmetric probe pairs containing elite / near-elite candidates.
+#
+# No rank loss, privileged state, simulator counterfactual supervision,
+# reward/readout, or planner modification is introduced.
+
+output_model_name: lewm_cem_mh_ald_h5_ddp4
+subdir: pusht_cem_mh_ald_h5_seed3072_ep10_ddp4
+
+num_workers: 6
+train_split: 0.9
+seed: 3072
+img_size: 224
+
+trainer:
+  max_epochs: 10
+  devices: auto
+  num_nodes: 1
+  accelerator: gpu
+  strategy: auto
+  sync_batchnorm: false
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 64
+  num_workers: ${num_workers}
+  persistent_workers: true
+  prefetch_factor: 3
+  pin_memory: true
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+wandb:
+  enabled: false
+  config:
+    entity: lewm
+    project: lewm
+    name: ${output_model_name}
+    id: ${subdir}
+    resume: allow
+    log_model: false
+
+wm:
+  type: lewm
+  history_size: 3
+  num_preds: 1
+  embed_dim: 192
+
+loss:
+  sigreg:
+    kwargs:
+      knots: 17
+      num_proj: 1024
+
+mh_ald:
+  enabled: true
+
+  # Keep the successful original MH-ALD teacher/student initialization.
+  init_policy: lewm_epoch_10
+  teacher_policy: lewm_epoch_10
+
+  rollout_horizon: 5
+
+  # Objective remains: TF + rollout + ONE modified MH-ALD objective.
+  tf_weight: 1.0
+  rollout_weight: 1.0
+  weight: 1.0
+
+  # Same local probe radius as formal MH-ALD.
+  perturb_radius: 0.1565
+
+  # 5 positions x 4 directions x +/- = 40 individual candidates/sample.
+  directions_per_position: 4
+
+  # Chunking keeps peak memory close to the existing MH-ALD path; runtime rises
+  # because we intentionally evaluate a larger training population.
+  probes_per_chunk: 2
+
+  cem_aligned:
+    enabled: true
+
+    # Move U0 to a mildly imperfect local center before population sampling.
+    # Same total raw-action L2 scale as the established MH local probe.
+    center_radius: 0.1565
+
+    # Individual candidates are ranked by anchored teacher terminal cost.
+    # Symmetric pairs inherit the maximum tier weight of their two signs.
+    elite_fraction: 0.20
+    near_elite_fraction: 0.30
+    elite_weight: 4.0
+    near_elite_weight: 2.0
+    base_weight: 1.0
