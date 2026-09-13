@@ -127,9 +127,9 @@ def run_closed(cfg, dataset, process, model, seed, selected, iterations, trace_e
             traces[i, solve_no]["populations"].append(entry)
         return cost
 
-    def tapped_solve(info, *args, **kwargs):
-        current_ids = ids(info["id"])
-        result = original_solver(info, *args, **kwargs)
+    def tapped_solve(info_dict, *args, **kwargs):
+        current_ids = ids(info_dict["id"])
+        result = original_solver(info_dict, *args, **kwargs)
         for j, v in enumerate(current_ids):
             i = idmap[int(v)]
             if i in selected:
@@ -143,11 +143,11 @@ def run_closed(cfg, dataset, process, model, seed, selected, iterations, trace_e
         def __getattr__(self, name):
             return getattr(original_solver, name)
 
-        def __call__(self, info, *args, **kwargs):
-            return tapped_solve(info, *args, **kwargs)
+        def __call__(self, info_dict, *args, **kwargs):
+            return tapped_solve(info_dict, *args, **kwargs)
 
-        def solve(self, info, *args, **kwargs):
-            return tapped_solve(info, *args, **kwargs)
+        def solve(self, info_dict, *args, **kwargs):
+            return tapped_solve(info_dict, *args, **kwargs)
 
     if trace_enabled:
         model.get_cost = tapped_cost
@@ -158,7 +158,7 @@ def run_closed(cfg, dataset, process, model, seed, selected, iterations, trace_e
                         process=process, transform=trans)
         world.set_policy(policy)
         metrics = world.evaluate_from_dataset(
-            dataset, start_steps=cfg.diag_start, episodes_idx=cfg.diag_episodes,
+            dataset, start_steps=list(cfg.diag_start), episodes_idx=list(cfg.diag_episodes),
             goal_offset_steps=25, eval_budget=50,
             callables=OmegaConf.to_container(cfg.eval.callables, resolve=True))
         successes = np.asarray(metrics["episode_successes"], dtype=bool).tolist()
