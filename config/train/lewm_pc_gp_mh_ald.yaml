@@ -1,0 +1,110 @@
+defaults:
+  - _self_
+  - data: pusht_mh_ald
+
+# Planner-Context Goal-Projected Multi-Horizon ALD (PC-GP-MH).
+#
+# Controlled against formal MH-ALD:
+#   * same official LeWM epoch-10 student initialization and frozen teacher
+#   * same frozen encoder/projector latent frame
+#   * same offline PushT data, optimizer, LR, batch size, seed, epochs
+#   * same trainable modules: action_encoder + predictor + pred_proj
+#   * same unchanged official CEM and planning-time raw latent distance
+#
+# Scientific changes supported by diagnostics:
+#   1) demo/probe rollouts start from one observed latent and warm predictor
+#      context 1->2->3 exactly as official planning does;
+#   2) terminal MH regression uses an anisotropic metric that doubles the
+#      student-to-target error component parallel to the target goal residual;
+#   3) finite raw-action probe radius is 0.30 (best tested diagnostic scale).
+#
+# No simulator state, counterfactual real rollout, reward/readout, rank label,
+# or planner modification is used for training.
+
+output_model_name: lewm_pc_gp_mh_h5_r030_ddp4
+subdir: pusht_pc_gp_mh_h5_r030_seed3072_ep10_ddp4
+
+num_workers: 6
+train_split: 0.9
+seed: 3072
+img_size: 224
+
+trainer:
+  max_epochs: 10
+  devices: auto
+  num_nodes: 1
+  accelerator: gpu
+  strategy: auto
+  sync_batchnorm: false
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 64
+  num_workers: ${num_workers}
+  persistent_workers: true
+  prefetch_factor: 3
+  pin_memory: true
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+wandb:
+  enabled: false
+  config:
+    entity: lewm
+    project: lewm
+    name: ${output_model_name}
+    id: ${subdir}
+    resume: allow
+    log_model: false
+
+wm:
+  type: lewm
+  # Keep original predictor maximum history and dataset/TF context at 3.
+  # Only the planner-context rollout path starts from one observed latent.
+  history_size: 3
+  num_preds: 1
+  embed_dim: 192
+
+loss:
+  sigreg:
+    kwargs:
+      knots: 17
+      num_proj: 1024
+
+mh_ald:
+  enabled: true
+  init_policy: lewm_epoch_10
+  teacher_policy: lewm_epoch_10
+  rollout_horizon: 5
+
+  # Preserve the formal MH-ALD weighting so the new result is attributable to
+  # context/metric/finite-scale calibration rather than optimizer retuning.
+  tf_weight: 1.0
+  rollout_weight: 1.0
+  weight: 1.0
+
+  # Problem-3 diagnostic: larger finite displacement produced substantially
+  # better response fidelity and candidate ordering than 0.1565 or 0.08.
+  perturb_radius: 0.30
+  directions_per_position: 1
+  probes_per_chunk: 2
+
+  planner_context:
+    enabled: true
+    # Official eval exposes one real observation at replanning time, while the
+    # predictor itself can consume at most three autoregressive latent slots.
+    observation_history: 1
+    predictor_max_history: 3
+
+  goal_sensitive:
+    enabled: true
+    # Base MH already penalizes the parallel component once.  A multiplier of
+    # 2.0 adds one extra copy, a conservative first test motivated by the oracle
+    # intervention (parallel error caused much larger ranking damage per unit
+    # error energy than orthogonal error).  No hyperparameter sweep is used.
+    parallel_multiplier: 2.0
+    projection_eps: 1e-8
