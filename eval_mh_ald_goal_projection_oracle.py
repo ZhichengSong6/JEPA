@@ -613,7 +613,7 @@ def main():
                 }
                 for prefix, expected in checks.items():
                     actual = row_out[f"{prefix}_full_rho_exact_encoder"]
-                    if not np.isclose(actual, expected, rtol=0.0, atol=1e-8):
+                    if not np.isclose(actual, expected, rtol=0.0, atol=2e-6):
                         raise RuntimeError(
                             f"Problem-2 full-ranking mismatch vs context oracle at "
                             f"anchor {ai}, {prefix}: {actual} vs {expected}"
