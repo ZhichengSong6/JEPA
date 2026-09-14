@@ -43,15 +43,18 @@ def main():
         out = root / f"seed{seed}"
         manifest = read(out/"manifest.json", [])
         protocol = read(out/"protocol.json", {})
-        gate = read(out/"repeatability.json", {"passed": False})
-        block = read(out/"BLOCKED.json")
+        gate = read(out/"repeatability.json")
+        repeat_status = "not_run" if gate is None else "passed" if gate.get("passed") else "failed"
+        gate = gate or {}
+        preflight = read(root/"preflight"/f"seed{seed}"/"preflight.json")
+        block = read(out/"BLOCKED.json") or read(root/"preflight"/f"seed{seed}"/"BLOCKED.json")
         mechanism = read(out/"mechanism.json", {})
         complete = gate.get("passed") and mechanism.get("status") == "complete" and not block
         seeds[str(seed)] = {"complete": bool(complete), "gate": gate, "blocked": block,
-                            "selected_cases": len(manifest),
+                            "repeatability_status": repeat_status, "preflight": preflight, "selected_cases": len(manifest),
                             "population_count": len(mechanism.get("populations", []))}
         runs = {l: read(out/f"{l}_repeat0.json") for l in ("mh", "cemmh")}
-        lines.append(f"\nseed={seed}: complete={bool(complete)}; repeatability={gate.get('passed')}; "
+        lines.append(f"\nseed={seed}: complete={bool(complete)}; repeatability={repeat_status}; "
                      f"selected={len(manifest)}; populations={seeds[str(seed)]['population_count']}")
         if block:
             lines.append("  BLOCKED: " + block["error"])
@@ -69,7 +72,7 @@ def main():
                               "historical_mh": int(h["mh"][i]), "historical_cemmh": int(h["cemmh"][i]),
                               "diagnostic_mh": int(runs["mh"]["successes"][i]),
                               "diagnostic_cemmh": int(runs["cemmh"]["successes"][i]),
-                              "repeatability_passed": bool(gate["passed"])})
+                              "repeatability_passed": bool(gate.get("passed"))})
         for row in mechanism.get("populations", []):
             flat = {k: row[k] for k in ("key", "source", "eval_index", "solve_no", "iteration", "historical_group", "prefix_steps")}
             flat["seed"] = seed
@@ -93,7 +96,7 @@ def main():
     with tarfile.open(archive, "w:gz") as tar:
         for path in sorted(root.rglob("*")):
             if (not path.is_file() or path.is_symlink() or path == archive
-                    or path.name.endswith((".pt", ".pyc", ".tmp"))
+                    or path.name.endswith((".pt", ".pyc", ".tmp", ".mp4"))
                     or path.name.startswith("slurm-")):
                 continue
             tar.add(path, arcname=str(path.relative_to(root)), recursive=False)
