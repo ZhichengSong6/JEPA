@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
 """Measure the MH-ALD train-context vs planner-context response gap on PushT.
 
-Scientific question
--------------------
-Formal MH-ALD calibrates multi-horizon action responses after a 3-frame REAL
-latent history.  Official LeWM PushT planning uses world.history_size=1, so a
-candidate rollout starts from one real observation and its later predictor
-contexts are self-generated.  Does the response fidelity gained by MH-ALD
-survive that inference context shift?
+Formal MH-ALD calibrates multi-horizon action responses after THREE real visual
+latents. Official LeWM PushT planning starts each candidate rollout from ONE
+observed visual latent because config/eval/pusht.yaml has world.history_size=1.
+The predictor itself still has a maximum history window of 3: its inference
+context therefore grows as
 
-This diagnostic holds EVERYTHING else fixed for an anchor:
-  * the same anchor row and reset variation,
-  * the same demonstrated center action sequence,
-  * the same symmetric block-wise probes,
-  * the same real counterfactual simulator rollouts,
-  * the same frozen encoder oracle and goal latent.
+    [z_t^real]
+    [z_t^real, z_{t+1}^pred]
+    [z_t^real, z_{t+1}^pred, z_{t+2}^pred]
+    [z_{t+1}^pred, z_{t+2}^pred, z_{t+3}^pred], ...
 
-It scores teacher and MH student under two rollout contexts:
+This diagnostic asks whether MH-ALD response fidelity survives that context
+shift. It holds fixed, per anchor:
+  * anchor row and reset variation,
+  * demonstrated center action sequence,
+  * symmetric block-wise probes,
+  * real simulator counterfactuals,
+  * frozen encoder oracle and goal latent.
 
-  train_context   : [z_{t-2}^real, z_{t-1}^real, z_t^real], history_size=3
-  planner_context : [z_t^real], history_size=1, then self-generated history
+Only model rollout context changes:
 
-The planner-context helper is numerically checked against JEPA.rollout() itself
-on the first anchor before any scientific result is accepted.
+  train_context   : 3 real latents, then autoregressive rollout
+  planner_context : 1 real latent, predictor warm-up to max history 3
 
-The oracle uses simulator counterfactuals for DIAGNOSIS ONLY.  It does not train
-or modify a model, planner, CEM cost, or benchmark evaluation.
+The planner-context helper is numerically checked against the checkpoint's
+actual JEPA.rollout() on the first anchor. Simulator counterfactuals are
+DIAGNOSIS ONLY and never modify training, CEM, or benchmark evaluation.
 """
 
 from __future__ import annotations
@@ -48,7 +50,6 @@ from sklearn import preprocessing
 
 from eval import img_transform
 from eval_mh_ald_teacher_response_oracle import (
-    _aggregate_anchor,
     _aggregate_response,
     _candidate_pair_indices,
     _cos,
@@ -82,8 +83,9 @@ def parse_args():
         "lewm_mh_ald_h5_ddp4_epoch_10",
     )
     p.add_argument("--num-anchors", type=int, default=40)
-    p.add_argument("--train-history-size", type=int, default=3)
-    p.add_argument("--planner-history-size", type=int, default=1)
+    p.add_argument("--train-observation-history", type=int, default=3)
+    p.add_argument("--planner-observation-history", type=int, default=1)
+    p.add_argument("--predictor-max-history", type=int, default=3)
     p.add_argument("--horizon", type=int, default=5)
     p.add_argument("--action-block", type=int, default=5)
     p.add_argument("--directions-per-position", type=int, default=4)
@@ -113,29 +115,68 @@ def _write_csv(path: Path, rows: list[dict]):
         writer.writerows(rows)
 
 
+@torch.inference_mode()
+def _planner_warmup_rollout(
+    model,
+    current_emb,
+    normalized_plans,
+    predictor_max_history,
+    device,
+):
+    """Exact latent recursion of JEPA.rollout starting from one observed frame.
+
+    current_emb: [D]
+    normalized_plans: [N,H,A]
+    returns: [N,H,D] predicted future latents
+    """
+    actions = torch.as_tensor(
+        normalized_plans, device=device, dtype=torch.float32
+    )
+    n, horizon = actions.shape[:2]
+    current = torch.as_tensor(
+        current_emb, device=device, dtype=torch.float32
+    )[None, None].expand(n, 1, -1).clone()
+    predicted = []
+    max_history = int(predictor_max_history)
+
+    for step in range(int(horizon)):
+        # At planner warm-up step k, only action blocks 0..k exist in the
+        # autoregressive history. JEPA.rollout recomputes action embeddings and
+        # takes the last <= max_history entries exactly this way.
+        action_hist = actions[:, : step + 1]
+        act_emb = model.action_encoder(action_hist)
+        emb_trunc = current[:, -max_history:]
+        act_trunc = act_emb[:, -max_history:]
+        next_emb = model.predict(emb_trunc, act_trunc)[:, -1:]
+        predicted.append(next_emb)
+        current = torch.cat([current, next_emb], dim=1)
+
+    return torch.cat(predicted, dim=1).detach()
+
+
+@torch.inference_mode()
 def _single_frame_official_rollout(
     model,
-    raw_image: np.ndarray,
+    raw_image,
     transform,
-    normalized_plan: np.ndarray,
-    device: torch.device,
+    normalized_plan,
+    predictor_max_history,
+    device,
 ):
-    """Call the checkpoint's actual JEPA.rollout with one observed frame."""
+    """Call checkpoint JEPA.rollout using the official one-frame input shape."""
     px = transform(raw_image)
     if not torch.is_tensor(px):
         px = torch.as_tensor(px)
-    # JEPA.rollout expects pixels [B,S,T,C,H,W] and actions [B,S,T,A].
     info = {
         "pixels": px.to(device=device, dtype=torch.float32)[None, None, None]
     }
     acts = torch.as_tensor(
-        normalized_plan,
-        device=device,
-        dtype=torch.float32,
+        normalized_plan, device=device, dtype=torch.float32
     )[None, None]
-    out = model.rollout(info, acts, history_size=3)
+    out = model.rollout(
+        info, acts, history_size=int(predictor_max_history)
+    )
     pred = out["predicted_emb"][0, 0]
-    # One observed latent followed by exactly H predicted latents.
     return pred[1:].detach()
 
 
@@ -145,54 +186,36 @@ def _assert_planner_semantics(
     transform,
     current_emb,
     normalized_plan,
+    predictor_max_history,
     device,
     atol,
 ):
-    """Prove history_size=1 helper matches the checkpoint's inference rollout."""
-    helper = _model_rollout(
+    helper = _planner_warmup_rollout(
         model,
-        current_emb[None],
+        current_emb,
         normalized_plan[None],
-        history_size=1,
-        horizon=int(normalized_plan.shape[0]),
-        device=device,
+        predictor_max_history,
+        device,
     )[0]
     official = _single_frame_official_rollout(
         model,
         raw_image,
         transform,
         normalized_plan,
+        predictor_max_history,
         device,
     )
     if helper.shape != official.shape:
         raise RuntimeError(
-            f"Planner semantic check shape mismatch: helper={helper.shape}, "
-            f"official={official.shape}"
+            f"Planner semantic check shape mismatch: {helper.shape} vs {official.shape}"
         )
     max_abs = float(torch.max(torch.abs(helper - official)).detach().cpu())
     if max_abs > float(atol):
         raise RuntimeError(
-            "history_size=1 diagnostic rollout does not match JEPA.rollout: "
+            "Planner warm-up helper does not match JEPA.rollout: "
             f"max_abs={max_abs:.3e} > atol={float(atol):.3e}"
         )
     return max_abs
-
-
-def _context_metrics(prefix, roll, oracle_z, goal_z, physical_cost):
-    pred_cost = (
-        torch.sum((roll[:, -1] - goal_z[None]) ** 2, dim=-1)
-        .detach().cpu().numpy().astype(np.float64)
-    )
-    return {
-        f"{prefix}_center_endpoint_mse": float(
-            torch.mean((roll[0, -1] - oracle_z[0, -1]) ** 2).detach().cpu()
-        ),
-        f"rho_{prefix}_exact_encoder": _spearman(pred_cost, (
-            torch.sum((oracle_z[:, -1] - goal_z[None]) ** 2, dim=-1)
-            .detach().cpu().numpy().astype(np.float64)
-        )),
-        f"rho_{prefix}_physical": _spearman(pred_cost, physical_cost),
-    }
 
 
 def _aggregate_context_anchor(rows, prefix):
@@ -229,19 +252,16 @@ def _aggregate_context_anchor(rows, prefix):
 
 
 def _response_view(rows, prefix):
-    out = []
-    for r in rows:
-        out.append({
-            "teacher_oracle_cosine": r[f"{prefix}_teacher_oracle_cosine"],
-            "student_oracle_cosine": r[f"{prefix}_student_oracle_cosine"],
-            "student_teacher_cosine": r[f"{prefix}_student_teacher_cosine"],
-            "teacher_oracle_gain": r[f"{prefix}_teacher_oracle_gain"],
-            "student_oracle_gain": r[f"{prefix}_student_oracle_gain"],
-            "teacher_oracle_relerr": r[f"{prefix}_teacher_oracle_relerr"],
-            "student_oracle_relerr": r[f"{prefix}_student_oracle_relerr"],
-            "student_teacher_relerr": r[f"{prefix}_student_teacher_relerr"],
-        })
-    return out
+    return [{
+        "teacher_oracle_cosine": r[f"{prefix}_teacher_oracle_cosine"],
+        "student_oracle_cosine": r[f"{prefix}_student_oracle_cosine"],
+        "student_teacher_cosine": r[f"{prefix}_student_teacher_cosine"],
+        "teacher_oracle_gain": r[f"{prefix}_teacher_oracle_gain"],
+        "student_oracle_gain": r[f"{prefix}_student_oracle_gain"],
+        "teacher_oracle_relerr": r[f"{prefix}_teacher_oracle_relerr"],
+        "student_oracle_relerr": r[f"{prefix}_student_oracle_relerr"],
+        "student_teacher_relerr": r[f"{prefix}_student_teacher_relerr"],
+    } for r in rows]
 
 
 def _aggregate_gap(rows):
@@ -259,30 +279,59 @@ def _aggregate_gap(rows):
         "student_relerr_planner_minus_train": _summary(
             r["student_relerr_planner_minus_train"] for r in rows
         ),
-        "student_planner_advantage_over_teacher_cosine": _summary(
-            r["planner_student_minus_teacher_cosine"] for r in rows
-        ),
-        "student_train_advantage_over_teacher_cosine": _summary(
+        "train_student_minus_teacher_cosine": _summary(
             r["train_student_minus_teacher_cosine"] for r in rows
         ),
+        "planner_student_minus_teacher_cosine": _summary(
+            r["planner_student_minus_teacher_cosine"] for r in rows
+        ),
+    }
+
+
+def _response_summary(rows):
+    return {
+        "train_context": _aggregate_response(_response_view(rows, "train")),
+        "planner_context": _aggregate_response(_response_view(rows, "planner")),
+        "planner_minus_train": _aggregate_gap(rows),
+    }
+
+
+def _group_summary(response_rows, anchor_rows):
+    return {
+        "train_context": {
+            "response": _aggregate_response(
+                _response_view(response_rows, "train")
+            ),
+            "anchor": _aggregate_context_anchor(anchor_rows, "train"),
+        },
+        "planner_context": {
+            "response": _aggregate_response(
+                _response_view(response_rows, "planner")
+            ),
+            "anchor": _aggregate_context_anchor(anchor_rows, "planner"),
+        },
+        "planner_minus_train": _aggregate_gap(response_rows),
     }
 
 
 def main():
     args = parse_args()
-    if int(args.train_history_size) != 3:
-        raise ValueError("Formal MH-ALD train history must be 3 for this A/B test.")
-    if int(args.planner_history_size) != 1:
-        raise ValueError("Formal PushT planner history must be 1 for this A/B test.")
+    if int(args.train_observation_history) != 3:
+        raise ValueError("Formal MH-ALD train observation history is 3.")
+    if int(args.planner_observation_history) != 1:
+        raise ValueError("Formal PushT planner observation history is 1.")
+    if int(args.predictor_max_history) != 3:
+        raise ValueError("Formal LeWM predictor max history is 3.")
     if int(args.horizon) != 5 or int(args.action_block) != 5:
-        raise ValueError("Formal PushT diagnostic expects horizon=5, action_block=5.")
+        raise ValueError("Formal PushT expects horizon=5 and action_block=5.")
 
     outdir = Path(args.output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
     cfg = OmegaConf.load(args.config)
-    if int(cfg.world.history_size) != 1:
+    if int(cfg.world.history_size) != int(args.planner_observation_history):
         raise RuntimeError(
-            f"Config world.history_size={cfg.world.history_size}, expected formal planner value 1."
+            "Eval config does not match requested planner observation history: "
+            f"cfg={cfg.world.history_size}, requested={args.planner_observation_history}"
         )
 
     cache_root = Path(
@@ -298,12 +347,12 @@ def main():
     finite = action[np.isfinite(action).all(axis=1)]
     scaler = preprocessing.StandardScaler().fit(finite)
 
-    # Deliberately retain the SAME eligibility as the established history=3
-    # teacher-response oracle so seed/num_anchors choose the same rows/probes.
     train_history_raw = (
-        (int(args.train_history_size) - 1) * int(args.action_block)
+        (int(args.train_observation_history) - 1) * int(args.action_block)
     )
     future_raw = int(args.horizon) * int(args.action_block)
+    # Keep exactly the established history=3 oracle eligibility. With identical
+    # seed/count this selects identical anchor rows and probe RNGs.
     ep_col, anchors = _select_anchor_rows(
         dataset,
         args.num_anchors,
@@ -316,20 +365,18 @@ def main():
 
     device = torch.device(args.device)
     transform = img_transform(cfg)
-
     print(f"Loading teacher: {args.teacher_policy}")
     teacher = swm.policy.AutoCostModel(args.teacher_policy).to(device).eval()
     teacher.requires_grad_(False)
     teacher.interpolate_pos_encoding = True
-
     print(f"Loading student: {args.student_policy}")
     student = swm.policy.AutoCostModel(args.student_policy).to(device).eval()
     student.requires_grad_(False)
     student.interpolate_pos_encoding = True
 
     env = gym.make(str(cfg.world.env_name), render_mode="rgb_array")
-    response_rows: list[dict] = []
-    anchor_rows: list[dict] = []
+    response_rows = []
+    anchor_rows = []
     frame_max_abs = 0.0
     semantic_check_max_abs = {"teacher": 0.0, "student": 0.0}
     t0 = time.time()
@@ -340,10 +387,9 @@ def main():
             goal_row = int(row) + future_raw
             goal_state = state[goal_row].copy()
             current_state = state[int(row)].copy()
-
             hist_rows = [
                 int(row) - train_history_raw + k * int(args.action_block)
-                for k in range(int(args.train_history_size))
+                for k in range(int(args.train_observation_history))
             ]
             hist_images = [
                 _render_state(env, state[r], goal_state, seed)
@@ -351,21 +397,19 @@ def main():
             ]
             current_image = hist_images[-1]
             goal_image = _render_state(env, goal_state, goal_state, seed)
-
             hist_s = _encode(
                 student, transform, hist_images, device, args.model_batch_size
             )
             hist_t = _encode(
                 teacher, transform, hist_images, device, args.model_batch_size
             )
-            this_frame_diff = float(
+            frame_diff = float(
                 torch.max(torch.abs(hist_s - hist_t)).detach().cpu()
             )
-            frame_max_abs = max(frame_max_abs, this_frame_diff)
-            if this_frame_diff > 2e-5:
+            frame_max_abs = max(frame_max_abs, frame_diff)
+            if frame_diff > 2e-5:
                 raise RuntimeError(
-                    "Teacher/student visual frames differ: "
-                    f"max_abs={this_frame_diff:.3e}"
+                    f"Teacher/student visual frames differ: {frame_diff:.3e}"
                 )
             goal_z = _encode(
                 student, transform, [goal_image], device, args.model_batch_size
@@ -378,12 +422,8 @@ def main():
                 int(row) : int(row) + future_raw
             ].copy()
             center_future = np.nan_to_num(
-                future_actions_raw,
-                nan=0.0,
-                posinf=1.0,
-                neginf=-1.0,
+                future_actions_raw, nan=0.0, posinf=1.0, neginf=-1.0
             ).astype(np.float32)
-
             candidates_raw, meta = _make_blockwise_candidates(
                 center_future,
                 positions=list(range(int(args.horizon))),
@@ -397,8 +437,6 @@ def main():
                 _pack_and_normalize(c, scaler, args.action_block)
                 for c in candidates_raw
             ])
-
-            # Train-context action sequence includes two preceding action blocks.
             hist_packed = _pack_and_normalize(
                 history_actions_raw, scaler, args.action_block
             )
@@ -423,24 +461,19 @@ def main():
                 horizon=args.horizon,
                 device=device,
             )
-
-            # Planner-context starts from current real latent only. The exact
-            # same five candidate action blocks are then rolled autoregressively.
-            teacher_planner = _model_rollout(
+            teacher_planner = _planner_warmup_rollout(
                 teacher,
-                hist_t[-1:].detach().cpu().numpy(),
+                hist_t[-1].detach().cpu().numpy(),
                 future_packed,
-                history_size=1,
-                horizon=args.horizon,
-                device=device,
+                args.predictor_max_history,
+                device,
             )
-            student_planner = _model_rollout(
+            student_planner = _planner_warmup_rollout(
                 student,
-                hist_s[-1:].detach().cpu().numpy(),
+                hist_s[-1].detach().cpu().numpy(),
                 future_packed,
-                history_size=1,
-                horizon=args.horizon,
-                device=device,
+                args.predictor_max_history,
+                device,
             )
 
             if ai == 0:
@@ -454,12 +487,11 @@ def main():
                         transform,
                         emb,
                         future_packed[0],
+                        args.predictor_max_history,
                         device,
                         args.semantic_check_atol,
                     )
-                    semantic_check_max_abs[name] = max(
-                        semantic_check_max_abs[name], diff
-                    )
+                    semantic_check_max_abs[name] = diff
                     print(
                         f"planner semantic check [{name}] max_abs={diff:.3e}",
                         flush=True,
@@ -485,7 +517,6 @@ def main():
                 if ci == 0:
                     center_states = states_h
                     center_contact = bool(contact)
-
             oracle_z = _encode(
                 student,
                 transform,
@@ -523,11 +554,11 @@ def main():
                 ("train", teacher_train, student_train),
                 ("planner", teacher_planner, student_planner),
             ):
-                tcost = (
+                teacher_cost = (
                     torch.sum((teacher_roll[:, -1] - goal_z[None]) ** 2, dim=-1)
                     .detach().cpu().numpy().astype(np.float64)
                 )
-                scost = (
+                student_cost = (
                     torch.sum((student_roll[:, -1] - goal_z[None]) ** 2, dim=-1)
                     .detach().cpu().numpy().astype(np.float64)
                 )
@@ -543,16 +574,16 @@ def main():
                         ).detach().cpu()
                     ),
                     f"rho_{prefix}_teacher_exact_encoder": _spearman(
-                        tcost, exact_enc_cost
+                        teacher_cost, exact_enc_cost
                     ),
                     f"rho_{prefix}_student_exact_encoder": _spearman(
-                        scost, exact_enc_cost
+                        student_cost, exact_enc_cost
                     ),
                     f"rho_{prefix}_teacher_physical": _spearman(
-                        tcost, physical_cost
+                        teacher_cost, physical_cost
                     ),
                     f"rho_{prefix}_student_physical": _spearman(
-                        scost, physical_cost
+                        student_cost, physical_cost
                     ),
                 })
             anchor.update({
@@ -580,7 +611,7 @@ def main():
                         oracle_resp = (
                             oracle_z[ip, h] - oracle_z[im, h]
                         ).detach().cpu().numpy() / (2.0 * radius)
-                        row_out = {
+                        out = {
                             "anchor_index": int(ai),
                             "dataset_row": int(row),
                             "replay_good": bool(replay_good),
@@ -599,71 +630,51 @@ def main():
                             ("train", teacher_train, student_train),
                             ("planner", teacher_planner, student_planner),
                         ):
-                            teacher_resp = (
+                            t_resp = (
                                 tr[ip, h] - tr[im, h]
                             ).detach().cpu().numpy() / (2.0 * radius)
-                            student_resp = (
+                            s_resp = (
                                 sr[ip, h] - sr[im, h]
                             ).detach().cpu().numpy() / (2.0 * radius)
-                            row_out.update({
-                                f"{prefix}_teacher_response_norm": float(
-                                    np.linalg.norm(teacher_resp)
-                                ),
-                                f"{prefix}_student_response_norm": float(
-                                    np.linalg.norm(student_resp)
-                                ),
-                                f"{prefix}_teacher_oracle_cosine": _cos(
-                                    teacher_resp, oracle_resp
-                                ),
-                                f"{prefix}_student_oracle_cosine": _cos(
-                                    student_resp, oracle_resp
-                                ),
-                                f"{prefix}_student_teacher_cosine": _cos(
-                                    student_resp, teacher_resp
-                                ),
-                                f"{prefix}_teacher_oracle_gain": _gain(
-                                    teacher_resp, oracle_resp
-                                ),
-                                f"{prefix}_student_oracle_gain": _gain(
-                                    student_resp, oracle_resp
-                                ),
-                                f"{prefix}_teacher_oracle_relerr": _relerr(
-                                    teacher_resp, oracle_resp
-                                ),
-                                f"{prefix}_student_oracle_relerr": _relerr(
-                                    student_resp, oracle_resp
-                                ),
-                                f"{prefix}_student_teacher_relerr": _relerr(
-                                    student_resp, teacher_resp
-                                ),
+                            out.update({
+                                f"{prefix}_teacher_response_norm": float(np.linalg.norm(t_resp)),
+                                f"{prefix}_student_response_norm": float(np.linalg.norm(s_resp)),
+                                f"{prefix}_teacher_oracle_cosine": _cos(t_resp, oracle_resp),
+                                f"{prefix}_student_oracle_cosine": _cos(s_resp, oracle_resp),
+                                f"{prefix}_student_teacher_cosine": _cos(s_resp, t_resp),
+                                f"{prefix}_teacher_oracle_gain": _gain(t_resp, oracle_resp),
+                                f"{prefix}_student_oracle_gain": _gain(s_resp, oracle_resp),
+                                f"{prefix}_teacher_oracle_relerr": _relerr(t_resp, oracle_resp),
+                                f"{prefix}_student_oracle_relerr": _relerr(s_resp, oracle_resp),
+                                f"{prefix}_student_teacher_relerr": _relerr(s_resp, t_resp),
                             })
-                        row_out.update({
+                        out.update({
                             "teacher_cosine_planner_minus_train": (
-                                row_out["planner_teacher_oracle_cosine"]
-                                - row_out["train_teacher_oracle_cosine"]
+                                out["planner_teacher_oracle_cosine"]
+                                - out["train_teacher_oracle_cosine"]
                             ),
                             "student_cosine_planner_minus_train": (
-                                row_out["planner_student_oracle_cosine"]
-                                - row_out["train_student_oracle_cosine"]
+                                out["planner_student_oracle_cosine"]
+                                - out["train_student_oracle_cosine"]
                             ),
                             "teacher_relerr_planner_minus_train": (
-                                row_out["planner_teacher_oracle_relerr"]
-                                - row_out["train_teacher_oracle_relerr"]
+                                out["planner_teacher_oracle_relerr"]
+                                - out["train_teacher_oracle_relerr"]
                             ),
                             "student_relerr_planner_minus_train": (
-                                row_out["planner_student_oracle_relerr"]
-                                - row_out["train_student_oracle_relerr"]
-                            ),
-                            "planner_student_minus_teacher_cosine": (
-                                row_out["planner_student_oracle_cosine"]
-                                - row_out["planner_teacher_oracle_cosine"]
+                                out["planner_student_oracle_relerr"]
+                                - out["train_student_oracle_relerr"]
                             ),
                             "train_student_minus_teacher_cosine": (
-                                row_out["train_student_oracle_cosine"]
-                                - row_out["train_teacher_oracle_cosine"]
+                                out["train_student_oracle_cosine"]
+                                - out["train_teacher_oracle_cosine"]
+                            ),
+                            "planner_student_minus_teacher_cosine": (
+                                out["planner_student_oracle_cosine"]
+                                - out["planner_teacher_oracle_cosine"]
                             ),
                         })
-                        response_rows.append(row_out)
+                        response_rows.append(out)
 
             elapsed = time.time() - t0
             eta = elapsed / (ai + 1) * (len(anchors) - ai - 1)
@@ -676,42 +687,36 @@ def main():
     finally:
         env.close()
 
-    _write_csv(outdir / "context_response_cells.csv", response_rows)
-    _write_csv(outdir / "context_anchor_metrics.csv", anchor_rows)
+    response_csv = outdir / "context_response_cells.csv"
+    anchor_csv = outdir / "context_anchor_metrics.csv"
+    _write_csv(response_csv, response_rows)
+    _write_csv(anchor_csv, anchor_rows)
 
     good_r = [r for r in response_rows if r["replay_good"]]
     good_a = [r for r in anchor_rows if r["replay_good"]]
-    good_contact_r = [r for r in good_r if r["pair_contact"]]
-    good_contact_a = [r for r in good_a if r["center_contact"]]
+    contact_r = [r for r in good_r if r["pair_contact"]]
+    contact_a = [r for r in good_a if r["center_contact"]]
+    no_contact_r = [r for r in good_r if not r["pair_contact"]]
+    no_contact_a = [r for r in good_a if not r["center_contact"]]
 
-    def pack(rows_r, rows_a):
-        return {
-            "train_context": {
-                "response": _aggregate_response(_response_view(rows_r, "train")),
-                "anchor": _aggregate_context_anchor(rows_a, "train"),
-            },
-            "planner_context": {
-                "response": _aggregate_response(_response_view(rows_r, "planner")),
-                "anchor": _aggregate_context_anchor(rows_a, "planner"),
-            },
-            "planner_minus_train": _aggregate_gap(rows_r),
-        }
-
-    by_offset = {}
-    for off in range(int(args.horizon)):
-        rr = [r for r in good_r if r["horizon_from_perturb"] == off]
-        by_offset[str(off)] = pack(rr, good_a)
-
-    by_position = {}
-    for p in range(int(args.horizon)):
-        rr = [r for r in good_r if r["position"] == p]
-        by_position[str(p)] = pack(rr, good_a)
+    by_offset = {
+        str(off): _response_summary([
+            r for r in good_r if r["horizon_from_perturb"] == off
+        ])
+        for off in range(int(args.horizon))
+    }
+    by_position = {
+        str(pos): _response_summary([
+            r for r in good_r if r["position"] == pos
+        ])
+        for pos in range(int(args.horizon))
+    }
 
     summary = {
         "question": (
-            "Does MH-ALD action-response fidelity degrade when the model is "
-            "rolled out with official planner context (one observed frame, then "
-            "self-generated latent history) instead of its 3-real-frame training context?"
+            "Does MH-ALD action-response fidelity degrade when candidate rollouts "
+            "start from one observed frame and warm up self-generated predictor "
+            "history, as in official LeWM planning, rather than three real latents?"
         ),
         "config": vars(args),
         "teacher_policy": args.teacher_policy,
@@ -720,38 +725,37 @@ def main():
         "same_anchor_probe_protocol_as_history3_oracle": True,
         "latent_frame_max_abs_teacher_vs_student": frame_max_abs,
         "planner_semantic_check_max_abs": semantic_check_max_abs,
-        "all": pack(response_rows, anchor_rows),
-        "replay_good": pack(good_r, good_a),
-        "replay_good_contact": pack(good_contact_r, good_contact_a),
+        "all": _group_summary(response_rows, anchor_rows),
+        "replay_good": _group_summary(good_r, good_a),
+        "replay_good_contact": _group_summary(contact_r, contact_a),
+        "replay_good_no_contact": _group_summary(no_contact_r, no_contact_a),
         "replay_good_by_horizon_from_perturb": by_offset,
         "replay_good_by_position": by_position,
         "protocol_notes": [
-            "The train/planner A/B uses identical anchors, candidate actions, real counterfactuals, goal, and latent frame.",
-            "Only model rollout context changes: history=3 real latents versus history=1 real latent followed by self-generated predictions.",
-            "Anchors retain the established history=3 oracle eligibility so identical seed/count select identical formal rows and probes.",
-            "Planner history=1 helper is numerically checked against checkpoint JEPA.rollout on the first anchor.",
-            "Rendered same-variation current/goal images are used in both contexts to isolate latent-context mismatch rather than appearance mismatch.",
-            "Simulator counterfactuals are diagnostic oracle data only and never used for training or planning.",
+            "A/B uses identical anchors, probes, real counterfactuals, goal, and frozen visual frame.",
+            "Train context starts from three real observation latents.",
+            "Planner context starts from one real latent; predictor history grows 1->2->3 and then rolls with max history 3.",
+            "The planner-context helper is numerically checked against checkpoint JEPA.rollout().",
+            "Anchors retain established history=3 eligibility so identical seed/count selects identical rows/probes.",
+            "Same-variation rendered current/goal images are used in both A/B arms to isolate context mismatch from appearance mismatch.",
+            "Simulator counterfactuals are diagnosis-only and never used for training or planning.",
         ],
         "elapsed_seconds": float(time.time() - t0),
     }
-    (outdir / "summary.json").write_text(
-        json.dumps(_jsonable(summary), indent=2) + "\n"
-    )
+    summary_path = outdir / "summary.json"
+    summary_path.write_text(json.dumps(_jsonable(summary), indent=2) + "\n")
 
-    rg = summary["replay_good"]
-    rgc = summary["replay_good_contact"]
     print("\n===== CONTEXT GAP ORACLE: REPLAY-GOOD =====")
-    print(json.dumps(_jsonable(rg), indent=2))
+    print(json.dumps(_jsonable(summary["replay_good"]), indent=2))
     print("\n===== CONTEXT GAP ORACLE: REPLAY-GOOD + CONTACT =====")
-    print(json.dumps(_jsonable(rgc), indent=2))
+    print(json.dumps(_jsonable(summary["replay_good_contact"]), indent=2))
     print(
         "semantic_check_max_abs="
         + json.dumps(semantic_check_max_abs, sort_keys=True)
     )
-    print(f"Saved: {outdir / 'context_response_cells.csv'}")
-    print(f"Saved: {outdir / 'context_anchor_metrics.csv'}")
-    print(f"Saved: {outdir / 'summary.json'}")
+    print(f"Saved: {response_csv}")
+    print(f"Saved: {anchor_csv}")
+    print(f"Saved: {summary_path}")
 
 
 if __name__ == "__main__":
