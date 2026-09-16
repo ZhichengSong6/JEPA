@@ -1,0 +1,96 @@
+defaults:
+  - _self_
+  - data: pusht_mh_ald
+
+# Pure Planner-Context Multi-Horizon ALD (PC-MH-ALD).
+#
+# Strict single-variable experiment against formal MH-ALD:
+#   * SAME student init / frozen teacher: official LeWM epoch 10
+#   * SAME frozen encoder/projector latent frame
+#   * SAME offline PushT data, optimizer, LR, batch, seed, epochs
+#   * SAME trainable modules: action_encoder + predictor + pred_proj
+#   * SAME TF / rollout / MH loss weights
+#   * SAME raw-action probe radius: 0.1565
+#   * SAME official CEM and raw latent terminal planning cost
+#
+# ONLY CHANGE:
+#   demonstrated and synthetic MH rollouts start from the one current observed
+#   latent and warm predictor context 1 -> 2 -> 3, matching official planning.
+#   The one-step TF branch remains the original three-real-latent context.
+#
+# No GP/GC term, no simulator state, no counterfactual real rollout, no
+# reward/readout, no rank label, and no planner modification.
+
+output_model_name: lewm_pc_mh_h5_r01565_ddp4
+subdir: pusht_pc_mh_h5_r01565_seed3072_ep10_ddp4
+
+num_workers: 6
+train_split: 0.9
+seed: 3072
+img_size: 224
+
+trainer:
+  max_epochs: 10
+  devices: auto
+  num_nodes: 1
+  accelerator: gpu
+  strategy: auto
+  sync_batchnorm: false
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 64
+  num_workers: ${num_workers}
+  persistent_workers: true
+  prefetch_factor: 3
+  pin_memory: true
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+wandb:
+  enabled: false
+  config:
+    entity: lewm
+    project: lewm
+    name: ${output_model_name}
+    id: ${subdir}
+    resume: allow
+    log_model: false
+
+wm:
+  type: lewm
+  # Dataset/TF history and predictor maximum history remain exactly formal MH.
+  history_size: 3
+  num_preds: 1
+  embed_dim: 192
+
+loss:
+  sigreg:
+    kwargs:
+      knots: 17
+      num_proj: 1024
+
+mh_ald:
+  enabled: true
+  init_policy: lewm_epoch_10
+  teacher_policy: lewm_epoch_10
+  rollout_horizon: 5
+
+  # Exact formal MH-ALD objective weights.
+  tf_weight: 1.0
+  rollout_weight: 1.0
+  weight: 1.0
+
+  # Exact formal MH-ALD finite perturbation protocol.
+  perturb_radius: 0.1565
+  directions_per_position: 1
+  probes_per_chunk: 2
+
+  planner_context:
+    enabled: true
+    observation_history: 1
+    predictor_max_history: 3
