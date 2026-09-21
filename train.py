@@ -394,7 +394,7 @@ def lejepa_forward(self, batch, stage, cfg):
 
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
 def run(cfg):
-    #########################
+    # Make scratch LeWM baselines fully reproducible: model initialization,\n    # dropout, SIGReg projections, data workers, and dataset shuffling share cfg.seed.\n    pl.seed_everything(int(cfg.seed), workers=True)\n\n    #########################
     ##       dataset       ##
     #########################
 
