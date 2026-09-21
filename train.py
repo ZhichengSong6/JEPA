@@ -11,6 +11,7 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
 from jepa import JEPA
+from distributed_training import global_batch_sigreg
 from module import ARPredictor, Embedder, MLP, SIGReg, PushTFactorHeads
 from utils import (
     get_column_normalizer,
@@ -255,7 +256,11 @@ def lejepa_forward(self, batch, stage, cfg):
     pred_emb = self.model.predict(ctx_emb, ctx_act)
 
     output['pred_loss'] = (pred_emb - tgt_emb).pow(2).mean()
-    output['sigreg_loss'] = self.sigreg(core_emb.transpose(0, 1))
+    output['sigreg_loss'] = global_batch_sigreg(
+        self.sigreg,
+        core_emb.transpose(0, 1),
+        enabled=bool(cfg.loss.sigreg.get("global_batch_ddp", False)),
+    )
     output['loss'] = output['pred_loss'] + lambd * output['sigreg_loss']
 
     if cfg.reachability.enabled:
