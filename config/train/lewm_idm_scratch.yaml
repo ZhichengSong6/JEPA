@@ -1,0 +1,75 @@
+defaults:
+  - _self_
+  - data: pusht_idm
+
+# Stage 1 ONLY. Random LeWM + the EXISTING ordinary IDM objective.
+# No teacher, continuation checkpoint, PC-MH, or bounded-IDM variant.
+initialization: scratch
+output_model_name: lewm_idm_scratch_w010_ddp4
+subdir: pusht_lewm_idm_scratch_w010_seed3072_ep10_ddp4
+expected_world_size: 4
+seed: 3072
+train_split: 0.9
+num_workers: 4
+img_size: 224
+patch_size: 14
+encoder_scale: tiny
+
+trainer:
+  max_epochs: 10
+  devices: 4
+  num_nodes: 1
+  accelerator: gpu
+  strategy: ddp
+  sync_batchnorm: true
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 32  # per rank; global batch = 4 * 32 = 128
+  num_workers: ${num_workers}
+  persistent_workers: true
+  prefetch_factor: 3
+  pin_memory: true
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+wm:
+  type: lewm
+  history_size: 3
+  num_preds: 1
+  embed_dim: 192
+
+predictor:
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0
+
+loss:
+  sigreg:
+    weight: 0.09
+    global_batch_ddp: true
+    kwargs:
+      knots: 17
+      num_proj: 1024
+
+idm:
+  enabled: true
+  init_policy: null  # rejected if overridden with a pretrained checkpoint
+  weight: 0.10
+  head_hidden_dim: 256
+  head_depth: 2
+  max_transitions: 3
+
+# The server launcher overrides run.dir with its absolute project path.
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/hydra/${subdir}
