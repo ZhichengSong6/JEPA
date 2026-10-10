@@ -1,0 +1,32 @@
+UPSTREAM INTEGRATION: local fixture helpers
+test_affine_equivalence (__main__.AlgebraTests.test_affine_equivalence) ... ok
+test_bad_shapes_rejected (__main__.AlgebraTests.test_bad_shapes_rejected) ... ok
+test_context_warmup_and_no_future_input (__main__.AlgebraTests.test_context_warmup_and_no_future_input) ... ok
+test_horizon_one_equals_original_anchor (__main__.AlgebraTests.test_horizon_one_equals_original_anchor) ... ok
+test_late_action_is_causal (__main__.AlgebraTests.test_late_action_is_causal) ... ok
+test_no_input_mutation (__main__.AlgebraTests.test_no_input_mutation) ... ok
+test_nonlinear_bias_example (__main__.AlgebraTests.test_nonlinear_bias_example) ... ok
+test_precomputed_reference_matches_direct (__main__.AlgebraTests.test_precomputed_reference_matches_direct) ... ok
+test_targets_are_detached (__main__.AlgebraTests.test_targets_are_detached) ... ok
+test_zero_probe_recovers_every_observation (__main__.AlgebraTests.test_zero_probe_recovers_every_observation) ... ok
+test_auto_gpu_count_rejected (__main__.ConfigurationTests.test_auto_gpu_count_rejected) ... ok
+test_different_parent_rejected (__main__.ConfigurationTests.test_different_parent_rejected) ... ok
+test_formal_changes_only_run_identifiers (__main__.ConfigurationTests.test_formal_changes_only_run_identifiers) ... ok
+test_output_escape_rejected (__main__.ConfigurationTests.test_output_escape_rejected) ... ok
+test_smoke_uses_same_parallelism (__main__.ConfigurationTests.test_smoke_uses_same_parallelism) ... ok
+test_unsafe_resolver_rejected (__main__.ConfigurationTests.test_unsafe_resolver_rejected) ... ok
+test_bfloat16_forward_backward_finite (__main__.IntegrationTests.test_bfloat16_forward_backward_finite) ... ok
+test_chunk_size_invariance_and_detach (__main__.IntegrationTests.test_chunk_size_invariance_and_detach) ... ok
+test_gradient_destinations_and_buffers (__main__.IntegrationTests.test_gradient_destinations_and_buffers) ... ok
+test_midpoint_response_decomposition (__main__.IntegrationTests.test_midpoint_response_decomposition) ... ok
+test_one_step_full_loss_and_gradients_match_old_code (__main__.IntegrationTests.test_one_step_full_loss_and_gradients_match_old_code) ... skipped 'requires actual project source'
+test_student_probe_does_not_receive_future_observations (__main__.IntegrationTests.test_student_probe_does_not_receive_future_observations) ... ok
+test_tf_and_demo_rollout_unchanged (__main__.IntegrationTests.test_tf_and_demo_rollout_unchanged) ... ok
+test_prepare_run_export_and_no_resume_with_fixture_backend (__main__.RunnerFixtureTests.test_prepare_run_export_and_no_resume_with_fixture_backend) ... ok
+test_state_fingerprint_supports_scalar_and_bfloat16 (__main__.RunnerFixtureTests.test_state_fingerprint_supports_scalar_and_bfloat16) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 1.337s
+
+OK (skipped=1)
+STEPWISE UNIT TESTS PASS: 25 tests (1 skipped)
