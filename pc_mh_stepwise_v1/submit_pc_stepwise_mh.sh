@@ -67,7 +67,11 @@ JOB="$RUN_DIR/job.sbatch"
   echo 'conda activate lewm'
   printf 'cd %q\n' "$REPO"
   printf 'export STABLEWM_HOME=%q\n' "$STABLEWM_HOME"
-  printf 'export TMPDIR=%q\n' "$RUN_DIR/runtime"
+  # Keep multiprocessing AF_UNIX socket paths short; preserve all artifacts in project storage.
+  # This cluster's long run directory exceeds the 108-byte Unix socket path limit.
+  echo 'export TMPDIR="$STABLEWM_HOME/t${SLURM_JOB_ID}"'
+  echo 'mkdir -p "$TMPDIR"'
+  echo 'echo "SLURM TMPDIR=$TMPDIR"'
   echo 'export PYTHONUNBUFFERED=1'
   echo 'export OMP_NUM_THREADS=1'
   echo 'export NCCL_DEBUG=WARN'
