@@ -86,9 +86,14 @@ class RecoveryTests(unittest.TestCase):
             self.assertTrue(all(r['skipped'] for r in rows))
             self.assertTrue(all('interaction_error_mse' not in r for r in rows))
             np.testing.assert_array_equal(center, old)
-            saved = np.load(next((Path(d)/'joint').glob('*.npz')))
-            np.testing.assert_array_equal(saved['raw_center'], old)
-            np.testing.assert_array_equal(saved['normalized_center'], old)
+            archive_path = next((Path(d)/'joint').glob('*.npz'))
+            # Close the NPZ reader and its file before TemporaryDirectory cleanup.
+            # An open deleted file can leave .nfs* entries on the server's NFS mount.
+            with archive_path.open('rb') as archive_file:
+                with np.load(archive_file, allow_pickle=False) as saved:
+                    np.testing.assert_array_equal(saved['raw_center'], old)
+                    np.testing.assert_array_equal(saved['normalized_center'], old)
+            self.assertTrue(archive_file.closed)
             self.assertEqual(json.loads(next((Path(d)/'joint').glob('*.json')).read_text())
                              ['center_audit']['raw_max'], 1.25)
 
