@@ -1,0 +1,46 @@
+Local authoring checks only. No installed stable_pretraining/stable_worldmodel or LeWM data/checkpoints; no CUDA/Slurm/DDP run.
+
+ANCHOR CPU TESTS PASS: 37; real LeWM weights/data/GPU/DDP NOT RUN
+
+test_empty_shape (__main__.MathTests.test_empty_shape) ... ok
+test_finite_direct_metrics (__main__.MathTests.test_finite_direct_metrics) ... ok
+test_float32 (__main__.MathTests.test_float32) ... ok
+test_frozen_grads_and_buffers (__main__.MathTests.test_frozen_grads_and_buffers) ... ok
+test_h1 (__main__.MathTests.test_h1) ... ok
+test_h3 (__main__.MathTests.test_h3) ... ok
+test_h5 (__main__.MathTests.test_h5) ... ok
+test_invalid_directions (__main__.MathTests.test_invalid_directions) ... ok
+test_invalid_shape (__main__.MathTests.test_invalid_shape) ... ok
+test_multiple_directions (__main__.MathTests.test_multiple_directions) ... ok
+test_nan_baseline_action_handling (__main__.MathTests.test_nan_baseline_action_handling) ... ok
+test_no_sampler_rng (__main__.MathTests.test_no_sampler_rng) ... ok
+test_nonfinite_loss_stops (__main__.MathTests.test_nonfinite_loss_stops) ... ok
+test_objective_exact (__main__.MathTests.test_objective_exact) ... ok
+test_pickleable_forward (__main__.MathTests.test_pickleable_forward) ... ok
+test_teacher_not_called (__main__.MathTests.test_teacher_not_called) ... ok
+test_zero_error (__main__.MathTests.test_zero_error) ... ok
+test_arithmetic (__main__.ConfigTests.test_arithmetic) ... ok
+test_auto_gpu_rejected (__main__.ConfigTests.test_auto_gpu_rejected) ... ok
+test_bad_weight_rejected (__main__.ConfigTests.test_bad_weight_rejected) ... ok
+test_formal_changes_only_paths (__main__.ConfigTests.test_formal_changes_only_paths) ... ok
+test_node_whitelist (__main__.ConfigTests.test_node_whitelist) ... ok
+test_not_mutate_base (__main__.ConfigTests.test_not_mutate_base) ... ok
+test_paths (__main__.ConfigTests.test_paths) ... ok
+test_privileged_state_rejected (__main__.ConfigTests.test_privileged_state_rejected) ... ok
+test_shell_syntax_no_mem (__main__.ConfigTests.test_shell_syntax_no_mem) ... ok
+test_smoke_gate_rejects_incomplete (__main__.ConfigTests.test_smoke_gate_rejects_incomplete) ... ok
+test_smoke_preserves_gpu_batch (__main__.ConfigTests.test_smoke_preserves_gpu_batch) ... ok
+test_startup_order_fresh_process (__main__.ConfigTests.test_startup_order_fresh_process) ... ok
+test_submit_rejects_disallowed_before_dependency (__main__.ConfigTests.test_submit_rejects_disallowed_before_dependency) ... ok
+test_wandb_separate (__main__.ConfigTests.test_wandb_separate) ... ok
+test_wrong_parent_rejected (__main__.ConfigTests.test_wrong_parent_rejected) ... ok
+test_bad_optional_component (__main__.ExecutionTests.test_bad_optional_component) ... ok
+test_baseline_delegation_export_metrics (__main__.ExecutionTests.test_baseline_delegation_export_metrics) ... ok
+test_baseline_patch_restored_on_exception (__main__.ExecutionTests.test_baseline_patch_restored_on_exception) ... ok
+test_incomplete_epoch_stops (__main__.ExecutionTests.test_incomplete_epoch_stops) ... ok
+test_state_digest_buffers (__main__.ExecutionTests.test_state_digest_buffers) ... ok
+
+----------------------------------------------------------------------
+Ran 37 tests in 1.450s
+
+OK
