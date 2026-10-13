@@ -3,6 +3,7 @@
 import argparse
 import copy
 import json
+import subprocess
 import sys
 from pathlib import Path
 import tempfile
@@ -226,9 +227,21 @@ class ForwardTests(unittest.TestCase):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--with-repo',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--with-repo',action='store_true')
+    parser.add_argument('--base-config',help='Saved baseline config for a read-only startup check')
+    args=parser.parse_args()
+    # Separate processes are essential: importing train_pc_mh_ald in this test
+    # process first used to conceal the production config-before-training bug.
+    startup=[sys.executable,str(Path(__file__).with_name('test_resolver_startup.py'))]
     if args.with_repo:
         runtime.sources()
+        startup.append('--with-repo')
+    if args.base_config:
+        if not args.with_repo: parser.error('--base-config requires --with-repo')
+        startup.extend(['--base-config',args.base_config])
+    subprocess.run(startup,check=True)
+    if args.with_repo:
         import planner_context_mh, train_pc_mh_ald
         print('PINNED REPOSITORY HASH / IMPORT CHECK PASS',flush=True)
     suite=unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])

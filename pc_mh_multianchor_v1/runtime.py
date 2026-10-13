@@ -50,8 +50,16 @@ def arithmetic(text):
 
 
 def omega():
+    # stable_pretraining registers 'eval' without replace=True on first import.
+    # Import it BEFORE installing our resolver, including in config-only CLI
+    # helpers. Later imports from train_mh_ald / data / train_pc_mh_ald then use
+    # the cached module rather than trying to register the same name again.
+    # Do not clear all resolvers, reload the dependency, or patch site-packages.
+    import stable_pretraining  # noqa: F401
     from omegaconf import OmegaConf
-    if not OmegaConf.has_resolver('eval'): OmegaConf.register_new_resolver('eval',arithmetic)
+    # Keep the release's numeric-only interpolation semantics. Replacement is
+    # deliberate and occurs only AFTER the dependency completed registration.
+    OmegaConf.register_new_resolver('eval', arithmetic, replace=True)
     return OmegaConf
 
 
