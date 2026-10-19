@@ -1,0 +1,16 @@
+Authoring-container validation for the fit/train metric-cache repair.
+
+Ran 43 CPU tests: OK (37 existing plus 6 stage regressions).
+The two-update baseline-delegation fixture now calls the forward with stage=fit.
+Fit and train aliases produce exactly equal loss values and parameter gradients.
+Validation-only and genuinely missing training records still fail the guard.
+Fit-stage backward and batch-end callbacks produce nonempty metric CSVs.
+Restoring the old raw-fit cache writer reproduces the missing train-record error.
+Python compilation and Bash syntax passed.
+
+Not run here: the installed stable_pretraining training_step dispatch check,
+real repository dependency imports, LeWM checkpoints, PushT data, CUDA, Slurm
+or DDP. stable_pretraining/stable_worldmodel are not installed locally.
+--with-repo provides a fresh-process installed-dispatch check for the server;
+it intercepts after forward, then tests CPU backward and the production callback.
+This is not a full framework optimizer/Trainer/DDP test or a planning result.

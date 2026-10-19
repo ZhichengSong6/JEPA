@@ -73,7 +73,12 @@ def anchor_only_forward(self, batch, stage, cfg, action_mean, action_std):
     # Direct outputs, not callback_metrics aliases: prevents empty CSV loss fields.
     if not hasattr(self, '_anchor_last'):
         self._anchor_last = {}
-    self._anchor_last[stage] = {k: v.detach() for k, v in result.items()}
+    # stable_pretraining.Module.training_step passes 'fit', whereas our
+    # training callbacks consume 'train'. Normalize this PRIVATE cache only;
+    # preserve the framework's original stage in log_dict keys below.
+    cache_stage = 'train' if stage in ('fit', 'train') else stage
+    self._anchor_last[cache_stage] = {k: v.detach() for k, v in result.items()}
+    self._anchor_last_raw_stage = stage
     self.log_dict({f'{stage}/{k}': v.detach() for k, v in result.items()},
                   on_step=True, sync_dist=True)
     return result

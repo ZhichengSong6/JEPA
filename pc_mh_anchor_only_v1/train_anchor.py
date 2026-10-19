@@ -107,8 +107,15 @@ def callback_type(base, cfg, m, out, holders):
         def on_after_backward(self, trainer, module):
             if not self.checked_backward:
                 check_parameters(module, gradients=True)
-                if 'pc_anchor_loss' not in module._anchor_last.get('train',{}):
-                    raise RuntimeError('The new forward did not execute')
+                recorded = getattr(module, '_anchor_last', {})
+                if 'pc_anchor_loss' not in recorded.get('train', {}):
+                    raise RuntimeError(
+                        'Missing anchor training metrics after backward: '
+                        f'cached_stages={list(recorded)!r}; '
+                        f'last_forward_stage={getattr(module, "_anchor_last_raw_stage", None)!r}. '
+                        'Expected the fit/train forward to record pc_anchor_loss. '
+                        'Do not bypass this check or reuse validation-only metrics.'
+                    )
                 self.checked_backward = True
                 if trainer.is_global_zero: print('ANCHOR FIRST BACKWARD PASS',flush=True)
 

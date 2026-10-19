@@ -67,10 +67,25 @@ def rollout(model,z,u,history):
 
 
 @contextlib.contextmanager
+def patched_modules(overrides):
+    # Restore only fixture keys, not the entire sys.modules dictionary.
+    # PyTorch may lazily import optimizer/compile modules inside a test;
+    # deleting those modules can trigger duplicate registrations later.
+    absent=object()
+    previous={name:sys.modules.get(name,absent) for name in overrides}
+    sys.modules.update(overrides)
+    try:yield
+    finally:
+        for name,value in previous.items():
+            if value is absent:sys.modules.pop(name,None)
+            else:sys.modules[name]=value
+
+
+@contextlib.contextmanager
 def fixtures():
     a=NS(_mh_causal_mask=mask,_mh_masked_mse=masked_mse,_frozen_visual_encode=frozen_encode)
     p=NS(planner_context_rollout=rollout)
-    with patch.dict(sys.modules,{'anchored_local_dynamics':a,'planner_context_mh':p}):yield
+    with patched_modules({'anchored_local_dynamics':a,'planner_context_mh':p}):yield
 
 
 class Action(torch.nn.Module):
@@ -161,6 +176,83 @@ class MathTests(unittest.TestCase):
     def test_pickleable_forward(self):self.assertIs(pickle.loads(pickle.dumps(anchor_only_forward)),anchor_only_forward)
 
 
+class StageTests(unittest.TestCase):
+    def test_fit_records_canonical_train_without_changing_log_prefix(self):
+        obj,b=module_and_batch();logged=[]
+        obj.log_dict=lambda values,**kw:logged.append(values)
+        with fixtures():
+            out=anchor_only_forward(obj,b,'fit',OmegaConf.create(base_config()),None,None)
+        self.assertEqual(set(obj._anchor_last),{'train'})
+        self.assertEqual(obj._anchor_last_raw_stage,'fit')
+        self.assertEqual(set(out),set(obj._anchor_last['train']))
+        self.assertEqual(set(logged[0]),{'fit/'+k for k in out})
+        self.assertTrue(all(not v.requires_grad for v in obj._anchor_last['train'].values()))
+
+    def test_fit_and_train_have_identical_values_and_parameter_gradients(self):
+        a,batch=module_and_batch();b=copy.deepcopy(a);cfg=OmegaConf.create(base_config())
+        with fixtures():
+            x=anchor_only_forward(a,copy.deepcopy(batch),'fit',cfg,None,None)
+            y=anchor_only_forward(b,copy.deepcopy(batch),'train',cfg,None,None)
+        for key in x:torch.testing.assert_close(x[key],y[key],rtol=0,atol=0)
+        x['loss'].backward();y['loss'].backward()
+        for (ka,pa),(kb,pb) in zip(a.model.named_parameters(),b.model.named_parameters()):
+            self.assertEqual(ka,kb)
+            if pa.grad is None:self.assertIsNone(pb.grad)
+            else:torch.testing.assert_close(pa.grad,pb.grad,rtol=0,atol=0)
+
+    def test_validation_never_creates_or_overwrites_training_metrics(self):
+        for stage in ('validate','val','test','predict'):
+            obj,b=module_and_batch();cfg=OmegaConf.create(base_config())
+            with fixtures():
+                anchor_only_forward(obj,copy.deepcopy(b),stage,cfg,None,None)
+                self.assertNotIn('train',obj._anchor_last)
+                anchor_only_forward(obj,copy.deepcopy(b),'fit',cfg,None,None)
+                saved=obj._anchor_last['train']
+                anchor_only_forward(obj,copy.deepcopy(b),stage,cfg,None,None)
+                self.assertIs(obj._anchor_last['train'],saved)
+
+    def test_missing_and_validation_only_metrics_still_block(self):
+        for stages in (None,{}, {'validate':{'pc_anchor_loss':torch.tensor(1.)}}):
+            obj,b=module_and_batch()
+            with fixtures():
+                anchor_only_forward(obj,b,'fit',OmegaConf.create(base_config()),None,None)['loss'].backward()
+            if stages is None:del obj._anchor_last
+            else:obj._anchor_last=stages
+            cb=runner.callback_type(type('Base',(),{}),None,{},Path('.'),[])()
+            with self.assertRaisesRegex(RuntimeError,'Missing anchor training metrics'):
+                cb.on_after_backward(NS(is_global_zero=False),obj)
+            self.assertFalse(cb.checked_backward)
+
+    def test_fit_backward_and_batch_metrics_reach_callback(self):
+        obj,b=module_and_batch();cfg=OmegaConf.create(base_config())
+        with tempfile.TemporaryDirectory() as d,fixtures(),contextlib.redirect_stdout(io.StringIO()):
+            tr=NS(is_global_zero=True,current_epoch=0,global_step=1)
+            cb=runner.callback_type(type('Base',(),{}),cfg,{},Path(d),[])()
+            cb.on_train_epoch_start(tr,obj)
+            out=anchor_only_forward(obj,b,'fit',cfg,None,None)
+            out['loss'].backward();cb.on_after_backward(tr,obj)
+            cb.on_train_batch_end(tr,obj,out,b,0)
+            self.assertTrue(cb.checked_backward)
+            self.assertEqual(cb.batches,1)
+            import csv
+            with (Path(d)/'training_progress.csv').open() as f:
+                rows=list(csv.DictReader(f))
+            self.assertEqual(len(rows),1)
+            self.assertAlmostEqual(float(rows[0]['pc_anchor_loss']),out['pc_anchor_loss'].item())
+
+    def test_legacy_raw_fit_cache_reproduces_guard_failure(self):
+        obj,b=module_and_batch()
+        with fixtures():
+            out=anchor_only_forward(obj,b,'fit',OmegaConf.create(base_config()),None,None)
+        out['loss'].backward()
+        # The old writer used the raw 'fit' key; the callback's train lookup
+        # then missed a real, finite forward. Do not accept this old layout.
+        obj._anchor_last={'fit':obj._anchor_last['train']}
+        cb=runner.callback_type(type('Base',(),{}),None,{},Path('.'),[])()
+        with self.assertRaisesRegex(RuntimeError,"cached_stages=\\['fit'\\]"):
+            cb.on_after_backward(NS(is_global_zero=False),obj)
+
+
 class ConfigTests(unittest.TestCase):
     def test_formal_changes_only_paths(self):
         b=base_config();d=rt.derive(b,'/tmp/root','/tmp/root/new','formal')
@@ -171,7 +263,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(d['trainer']['devices'],4);self.assertEqual(d['loader'],b['loader'])
         self.assertEqual(d['trainer']['max_steps'],2)
     def test_not_mutate_base(self):
-        b=base_config();old=copy.deepcopy(b);rt.derive(b,'/tmp/root','/tmp/root/new','formal');self.assertEqual(b,old)
+        b=base_config();old=copy.deepcopy(b);rt.derive(b,'/tmp/root','/tmp/root/new','smoke');self.assertEqual(b,old)
     def test_wandb_separate(self):
         b=base_config();b['wandb']={'enabled':True,'config':{'id':'old','name':'old','resume':'allow'}}
         d=rt.derive(b,'/tmp/root','/tmp/root/new','formal')
@@ -234,12 +326,12 @@ class ExecutionTests(unittest.TestCase):
             cb.on_fit_start(tr,mod);cb.on_train_epoch_start(tr,mod)
             opt=torch.optim.AdamW([p for p in s.parameters() if p.requires_grad],lr=.01)
             for i in range(2):
-                opt.zero_grad();y=baseline.pc_mh_ald_forward(mod,copy.deepcopy(batch),'train',cfg,None,None)
+                opt.zero_grad();y=baseline.pc_mh_ald_forward(mod,copy.deepcopy(batch),'fit',cfg,None,None)
                 y['loss'].backward();cb.on_after_backward(tr,mod);opt.step();tr.global_step+=1
                 cb.on_train_batch_end(tr,mod,y,batch,i)
             cb.on_train_epoch_end(tr,mod);cb.on_fit_end(tr,mod)
         baseline.run=run;original=baseline.pc_mh_ald_forward
-        with tempfile.TemporaryDirectory() as d,fixtures(),patch.dict(sys.modules,{'train_pc_mh_ald':baseline}),contextlib.redirect_stdout(io.StringIO()):
+        with tempfile.TemporaryDirectory() as d,fixtures(),patched_modules({'train_pc_mh_ald':baseline}),contextlib.redirect_stdout(io.StringIO()):
             out=Path(d);c=rt.derive(base_config(),out.parent,out,'smoke');cfg=OmegaConf.create(c)
             m={'world_size':1,'local_batch':2,'global_batch':2,'mode':'smoke'}
             result=runner.execute(cfg,m,out)
@@ -253,7 +345,7 @@ class ExecutionTests(unittest.TestCase):
         def fail(cfg):raise RuntimeError('sentinel')
         b=NS(pc_mh_ald_forward=lambda *a:None,ModelObjectCallBack=type('C',(),{}),_load_policy_model=lambda n:None,run=fail)
         before=(b.pc_mh_ald_forward,b.ModelObjectCallBack,b._load_policy_model)
-        with patch.dict(sys.modules,{'train_pc_mh_ald':b}),self.assertRaisesRegex(RuntimeError,'sentinel'):
+        with patched_modules({'train_pc_mh_ald':b}),self.assertRaisesRegex(RuntimeError,'sentinel'):
             runner.execute(None,{},Path('.'))
         self.assertEqual((b.pc_mh_ald_forward,b.ModelObjectCallBack,b._load_policy_model),before)
     def test_incomplete_epoch_stops(self):
@@ -302,16 +394,61 @@ def real_repo_equivalence():
     print('PINNED REAL FORWARD ZERO-PROBE VALUE / GRADIENT EQUIVALENCE PASS')
 
 
+def real_training_step_dispatch():
+    """Run installed Module.training_step up to its real forward dispatch.
+
+    Stop immediately after forward (before framework optimizer handling), then
+    run CPU backward and the production callback on that exact result. This is
+    not an end-to-end Trainer/DDP test and does not load LeWM data/checkpoints.
+    """
+    import inspect
+    import stable_pretraining as spt
+    obj,batch=module_and_batch();cfg=OmegaConf.create(base_config())
+    captured={}
+    class ForwardCaptured(Exception):pass
+    class Probe(NS):
+        def __call__(self,batch,stage):
+            captured['stage']=stage
+            captured['result']=anchor_only_forward(self,batch,stage,cfg,None,None)
+            raise ForwardCaptured()
+    probe=Probe(**vars(obj))
+    actual_step=inspect.unwrap(spt.Module.training_step)
+    with fixtures():
+        try:actual_step(probe,copy.deepcopy(batch),0)
+        except ForwardCaptured:pass
+    if captured.get('stage') not in ('fit','train'):
+        raise RuntimeError('Unsupported installed training stage: '+repr(captured.get('stage')))
+    out=captured['result']
+    out['loss'].backward()
+    with tempfile.TemporaryDirectory() as d:
+        callback=runner.callback_type(type('Base',(),{}),cfg,{},Path(d),[])()
+        trainer=NS(is_global_zero=False,current_epoch=0,global_step=1)
+        callback.on_train_epoch_start(trainer,probe)
+        callback.on_after_backward(trainer,probe)
+        callback.on_train_batch_end(trainer,probe,out,batch,0)
+        if not callback.checked_backward or callback.batches!=1:
+            raise RuntimeError('Installed-stage forward did not reach callback checks')
+    print('REAL SPT TRAINING_STEP DISPATCH -> BACKWARD AUDIT PASS: '
+          f"stage={captured['stage']!r}, source={inspect.getsourcefile(actual_step)}",flush=True)
+    print('CPU FIXTURE ONLY: dispatch captured before optimizer handling; '
+          'no LeWM data/checkpoints, Trainer, CUDA or DDP',flush=True)
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--with-repo',action='store_true');p.add_argument('--base-config')
+    p.add_argument('--real-stage-dispatch',action='store_true',help='Installed Module dispatch with a tiny CPU model only')
     a=p.parse_args()
+    if a.real_stage_dispatch:
+        real_training_step_dispatch()
+        return
     if a.with_repo:
         base=a.base_config or os.environ.get('BASE_CONFIG')
         if not base:p.error('--with-repo requires --base-config or BASE_CONFIG')
         subprocess.run([sys.executable,str(rt.HERE/'train_anchor.py'),'check','--base-config',base],check=True)
+        subprocess.run([sys.executable,str(rt.HERE/'test_anchor.py'),'--real-stage-dispatch'],check=True)
         real_repo_equivalence()
     suite=unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(c)
-                             for c in (MathTests,ConfigTests,ExecutionTests))
+                             for c in (MathTests,ConfigTests,ExecutionTests,StageTests))
     r=unittest.TextTestRunner(verbosity=2).run(suite)
     if not r.wasSuccessful():raise SystemExit(1)
     print(f'ANCHOR CPU TESTS PASS: {r.testsRun}; real LeWM weights/data/GPU/DDP NOT RUN')
