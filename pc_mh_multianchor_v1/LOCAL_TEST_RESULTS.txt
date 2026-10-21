@@ -1,0 +1,42 @@
+test_official_interface_fixture (__main__.AdapterTests.test_official_interface_fixture) ... ok
+test_control_uses_same_mask_but_old_target (__main__.ForwardTests.test_control_uses_same_mask_but_old_target) ... ok
+test_original_objective_and_query_gradients (__main__.ForwardTests.test_original_objective_and_query_gradients) ... ok
+test_production_forward_is_pickleable (__main__.ForwardTests.test_production_forward_is_pickleable) ... ok
+test_validation_does_not_sample_query_labels (__main__.ForwardTests.test_validation_does_not_sample_query_labels) ... ok
+test_audit_is_not_recalibrated (__main__.MathTests.test_audit_is_not_recalibrated) ... ok
+test_bad_loss_shapes (__main__.MathTests.test_bad_loss_shapes) ... ok
+test_causal_features (__main__.MathTests.test_causal_features) ... ok
+test_constant_features_finite (__main__.MathTests.test_constant_features_finite) ... ok
+test_ddp_global_denominator (__main__.MathTests.test_ddp_global_denominator) ... ok
+test_disabled_gate_has_no_labels (__main__.MathTests.test_disabled_gate_has_no_labels) ... ok
+test_distinct_neighbors_and_exclusion (__main__.MathTests.test_distinct_neighbors_and_exclusion) ... ok
+test_episode_determinism (__main__.MathTests.test_episode_determinism) ... ok
+test_episode_isolation (__main__.MathTests.test_episode_isolation) ... ok
+test_episode_small_rejected (__main__.MathTests.test_episode_small_rejected) ... ok
+test_gate_accepts_information (__main__.MathTests.test_gate_accepts_information) ... ok
+test_gate_rejects_no_improvement (__main__.MathTests.test_gate_rejects_no_improvement) ... ok
+test_insufficient_episodes_rejected (__main__.MathTests.test_insufficient_episodes_rejected) ... ok
+test_loss_nonfinite_rejected (__main__.MathTests.test_loss_nonfinite_rejected) ... ok
+test_masked_loss_gradient (__main__.MathTests.test_masked_loss_gradient) ... ok
+test_memory_constant_residual (__main__.MathTests.test_memory_constant_residual) ... ok
+test_memory_does_not_mutate (__main__.MathTests.test_memory_does_not_mutate) ... ok
+test_memory_prefix_not_future (__main__.MathTests.test_memory_prefix_not_future) ... ok
+test_no_rng_mutation_from_numpy_probes (__main__.MathTests.test_no_rng_mutation_from_numpy_probes) ... ok
+test_nonfinite_rejected (__main__.MathTests.test_nonfinite_rejected) ... ok
+test_npz_closes_and_no_overwrite (__main__.MathTests.test_npz_closes_and_no_overwrite) ... ok
+test_outside_bounds_not_clipped (__main__.MathTests.test_outside_bounds_not_clipped) ... ok
+test_pair_labels_not_neighbor_inputs (__main__.MathTests.test_pair_labels_not_neighbor_inputs) ... ok
+test_pair_reference_is_different_episode (__main__.MathTests.test_pair_reference_is_different_episode) ... ok
+test_pool_private_rng_and_with_replacement (__main__.MathTests.test_pool_private_rng_and_with_replacement) ... ok
+test_query_selection_collapsed_rejected (__main__.MathTests.test_query_selection_collapsed_rejected) ... ok
+test_query_selection_unique (__main__.MathTests.test_query_selection_unique) ... ok
+test_reference_cancels_exactly (__main__.MathTests.test_reference_cancels_exactly) ... ok
+test_safe_arithmetic (__main__.MathTests.test_safe_arithmetic) ... ok
+test_scales_bank_only (__main__.MathTests.test_scales_bank_only) ... ok
+test_zero_mask_zero_gradient (__main__.MathTests.test_zero_mask_zero_gradient) ... ok
+
+----------------------------------------------------------------------
+Ran 36 tests in 0.031s
+
+OK
+MULTIANCHOR CPU TESTS PASS: 36; real LeWM/GPU/Slurm pipeline NOT RUN

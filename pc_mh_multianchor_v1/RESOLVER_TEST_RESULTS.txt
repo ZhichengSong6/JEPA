@@ -1,0 +1,23 @@
+Resolver startup patch validation
+
+test_config_first_then_training_import (__main__.ResolverStartupTests.test_config_first_then_training_import) ... ok
+test_dependency_first_and_repeated_calls (__main__.ResolverStartupTests.test_dependency_first_and_repeated_calls) ... ok
+test_dependency_import_error_is_not_swallowed (__main__.ResolverStartupTests.test_dependency_import_error_is_not_swallowed) ... ok
+test_numeric_only_resolver_survives_late_import (__main__.ResolverStartupTests.test_numeric_only_resolver_survives_late_import) ... ok
+test_old_order_reproduces_exact_duplicate (__main__.ResolverStartupTests.test_old_order_reproduces_exact_duplicate) ... ok
+test_unrelated_and_builtin_resolvers_preserved (__main__.ResolverStartupTests.test_unrelated_and_builtin_resolvers_preserved) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 30.485s
+
+OK
+RESOLVER STARTUP SYNTHETIC TESTS PASS: 6
+
+Original suite:
+Command: python -m unittest test_multianchor -q
+Ran 36 tests in 0.112s
+OK
+EXIT_STATUS=0
+
+Synthetic dependency startup emulation only; real installed stable_pretraining,
+stable_worldmodel, CUDA and server config/checkpoint execution NOT RUN.
