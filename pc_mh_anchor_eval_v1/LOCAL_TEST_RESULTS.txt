@@ -1,0 +1,35 @@
+test_bad_node_fails_before_conda (__main__.AdapterTests.test_bad_node_fails_before_conda) ... ok
+test_budget_forwarding_and_no_trace (__main__.AdapterTests.test_budget_forwarding_and_no_trace) ... ok
+test_check_pair_keeps_legacy_gate (__main__.AdapterTests.test_check_pair_keeps_legacy_gate) ... ok
+test_digest_includes_buffers (__main__.AdapterTests.test_digest_includes_buffers) ... ok
+test_environment_mismatch_rejected (__main__.AdapterTests.test_environment_mismatch_rejected) ... ok
+test_full_summary_from_sealed_fixtures (__main__.AdapterTests.test_full_summary_from_sealed_fixtures) ... ok
+test_goal_recipe_mismatch_rejected (__main__.AdapterTests.test_goal_recipe_mismatch_rejected) ... ok
+test_launcher_syntax_and_single_gpu (__main__.AdapterTests.test_launcher_syntax_and_single_gpu) ... ok
+test_nonfinite_model_rejected (__main__.AdapterTests.test_nonfinite_model_rejected) ... ok
+test_runtime_paths (__main__.AdapterTests.test_runtime_paths) ... ok
+test_training_rejects_smoke (__main__.AdapterTests.test_training_rejects_smoke) ... ok
+test_unexpected_trace_rejected (__main__.AdapterTests.test_unexpected_trace_rejected) ... ok
+test_bad_inputs (__main__.CohortTests.test_bad_inputs) ... ok
+test_deterministic_and_disjoint_rows (__main__.CohortTests.test_deterministic_and_disjoint_rows) ... ok
+test_duplicate_seeds (__main__.CohortTests.test_duplicate_seeds) ... ok
+test_excluded_whole_episode_and_valid_future (__main__.CohortTests.test_excluded_whole_episode_and_valid_future) ... ok
+test_exclusion_csv_closed (__main__.CohortTests.test_exclusion_csv_closed) ... ok
+test_global_rng_unchanged (__main__.CohortTests.test_global_rng_unchanged) ... ok
+test_no_outcome_in_selection (__main__.CohortTests.test_no_outcome_in_selection) ... ok
+test_sorted_per_seed (__main__.CohortTests.test_sorted_per_seed) ... ok
+test_too_few (__main__.CohortTests.test_too_few) ... ok
+test_bootstrap_reproducible_and_zero_difference (__main__.OutputTests.test_bootstrap_reproducible_and_zero_difference) ... ok
+test_cell_identity_checked (__main__.OutputTests.test_cell_identity_checked) ... ok
+test_effect_sign_and_discordance (__main__.OutputTests.test_effect_sign_and_discordance) ... ok
+test_missing_and_duplicate_cells_fail (__main__.OutputTests.test_missing_and_duplicate_cells_fail) ... ok
+test_nan_write_rejected (__main__.OutputTests.test_nan_write_rejected) ... ok
+test_seal_roundtrip_and_no_overwrite (__main__.OutputTests.test_seal_roundtrip_and_no_overwrite) ... ok
+test_seal_tampering (__main__.OutputTests.test_seal_tampering) ... ok
+test_success_not_inferred_from_mean (__main__.OutputTests.test_success_not_inferred_from_mean) ... ok
+
+----------------------------------------------------------------------
+Ran 29 tests in 0.088s
+
+OK
+PAIRED EVAL CPU TESTS PASS: 29; real LeWM/PushT/GPU evaluation NOT RUN
