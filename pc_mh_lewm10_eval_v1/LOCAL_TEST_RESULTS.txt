@@ -1,0 +1,42 @@
+test_corrupt_parent_seal_blocks_reuse (__main__.ParentTests.test_corrupt_parent_seal_blocks_reuse) ... ok
+test_fresh_output_required (__main__.ParentTests.test_fresh_output_required) ... ok
+test_full_execute_adapter_only_parent_evaluated (__main__.ParentTests.test_full_execute_adapter_only_parent_evaluated) ... ok
+test_full_resume_has_zero_evaluations (__main__.ParentTests.test_full_resume_has_zero_evaluations) ... ok
+test_initial_mismatch_not_written_as_valid (__main__.ParentTests.test_initial_mismatch_not_written_as_valid) ... EVAL LeWM10 B1000 seed=142; unchanged 100-case cohort
+ok
+test_missing_artifact_coverage_rejected (__main__.ParentTests.test_missing_artifact_coverage_rejected) ... ok
+test_missing_old_cell_rejected (__main__.ParentTests.test_missing_old_cell_rejected) ... ok
+test_missing_parent_no_partial_overall_mean (__main__.ParentTests.test_missing_parent_no_partial_overall_mean) ... ok
+test_model_mutation_blocks_result (__main__.ParentTests.test_model_mutation_blocks_result) ... EVAL LeWM10 B1000 seed=142; unchanged 100-case cohort
+ok
+test_old_summary_change_rejected (__main__.ParentTests.test_old_summary_change_rejected) ... ok
+test_only_ten_parent_calls_and_no_resampling (__main__.ParentTests.test_only_ten_parent_calls_and_no_resampling) ... ok
+test_parent_from_training_hash (__main__.ParentTests.test_parent_from_training_hash) ... ok
+test_parent_replaced_rejected (__main__.ParentTests.test_parent_replaced_rejected) ... ok
+test_partial_resume_only_missing_cell (__main__.ParentTests.test_partial_resume_only_missing_cell) ... ok
+test_prepare_preserves_cohort_bytes_and_old_files (__main__.ParentTests.test_prepare_preserves_cohort_bytes_and_old_files) ... ok
+test_resealed_wrong_parent_config_blocks_reuse (__main__.ParentTests.test_resealed_wrong_parent_config_blocks_reuse) ... ok
+test_source_not_complete_rejected (__main__.ParentTests.test_source_not_complete_rejected) ... ok
+test_source_readonly_and_full_validation (__main__.ParentTests.test_source_readonly_and_full_validation) ... ok
+test_summarize_three_models_reproduces_old_effect (__main__.ParentTests.test_summarize_three_models_reproduces_old_effect) ... ok
+test_tampered_old_cell_rejected (__main__.ParentTests.test_tampered_old_cell_rejected) ... ok
+test_wrong_cell_policy_rejected (__main__.ParentTests.test_wrong_cell_policy_rejected) ... ok
+test_wrong_config_rejected_even_if_resealed (__main__.ParentTests.test_wrong_config_rejected_even_if_resealed) ... ok
+test_wrong_parent_name_rejected (__main__.ParentTests.test_wrong_parent_name_rejected) ... ok
+test_cohort_duplicate_row (__main__.SmallTests.test_cohort_duplicate_row) ... ok
+test_cohort_reorder (__main__.SmallTests.test_cohort_reorder) ... ok
+test_cohort_valid (__main__.SmallTests.test_cohort_valid) ... ok
+test_disallowed_nodes_rejected_before_conda (__main__.SmallTests.test_disallowed_nodes_rejected_before_conda) ... ok
+test_excluded_episode (__main__.SmallTests.test_excluded_episode) ... ok
+test_goal_offset (__main__.SmallTests.test_goal_offset) ... ok
+test_integer_ids (__main__.SmallTests.test_integer_ids) ... ok
+test_pairwise_sign_and_zero (__main__.SmallTests.test_pairwise_sign_and_zero) ... ok
+test_partial_stats_rejected (__main__.SmallTests.test_partial_stats_rejected) ... ok
+test_paths (__main__.SmallTests.test_paths) ... ok
+test_shell_single_gpu_no_mem_and_no_visibility_override (__main__.SmallTests.test_shell_single_gpu_no_mem_and_no_visibility_override) ... ok
+
+----------------------------------------------------------------------
+Ran 34 tests in 3.493s
+
+OK
+LEWM10 SUPPLEMENT CPU TESTS PASS: 34; real LeWM/PushT/CUDA/Slurm NOT RUN
