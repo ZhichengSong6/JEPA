@@ -1,0 +1,16 @@
+{
+  "mode": "response",
+  "horizon": 5,
+  "history_size": 3,
+  "packed_action_dim": 10,
+  "lr": 0.00001,
+  "steps": 3,
+  "strength": 1.0,
+  "buffer_blocks": 64,
+  "batch_starts": 16,
+  "query_count": 32,
+  "min_blocks": 1,
+  "max_grad_norm": 1.0,
+  "train_parts": ["action_encoder", "predictor", "pred_proj"],
+  "horizon_weights": null
+}

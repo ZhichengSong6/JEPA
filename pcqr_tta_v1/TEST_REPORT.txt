@@ -1,0 +1,39 @@
+test_buffers_only_completed_blocks (test_bridge.BridgeTests.test_buffers_only_completed_blocks) ... ok
+test_exactly_one_update_per_replan_and_fixed_cem_weights (test_bridge.BridgeTests.test_exactly_one_update_per_replan_and_fixed_cem_weights) ... ok
+test_frozen_matches_base_policy_without_adaptation (test_bridge.BridgeTests.test_frozen_matches_base_policy_without_adaptation) ... ok
+test_initial_pairing_match_accepted (test_bridge.BridgeTests.test_initial_pairing_match_accepted) ... ok
+test_initial_pairing_mismatch_rejected (test_bridge.BridgeTests.test_initial_pairing_mismatch_rejected) ... ok
+test_mid_episode_reset_rejected (test_bridge.BridgeTests.test_mid_episode_reset_rejected) ... ok
+test_missing_goal_fails_audit_not_training (test_bridge.BridgeTests.test_missing_goal_fails_audit_not_training) ... ok
+test_multi_environment_rejected (test_bridge.BridgeTests.test_multi_environment_rejected) ... ok
+test_wrong_previous_action_rejected (test_bridge.BridgeTests.test_wrong_previous_action_rejected) ... ok
+test_capacity_preserves_action_endpoint_alignment (test_core.BufferTests.test_capacity_preserves_action_endpoint_alignment) ... ok
+test_only_observed_horizons_valid (test_core.BufferTests.test_only_observed_horizons_valid) ... ok
+test_reset_and_input_checks (test_core.BufferTests.test_reset_and_input_checks) ... ok
+test_ambiguous_model_rejected (test_core.CoreTests.test_ambiguous_model_rejected) ... ok
+test_backprop_inside_cem_inference_mode (test_core.CoreTests.test_backprop_inside_cem_inference_mode) ... ok
+test_centering_allows_common_translation_per_horizon (test_core.CoreTests.test_centering_allows_common_translation_per_horizon) ... ok
+test_config_rejects_invalid_values (test_core.CoreTests.test_config_rejects_invalid_values) ... ok
+test_freezes_encoder_projector_buffers_and_dropout (test_core.CoreTests.test_freezes_encoder_projector_buffers_and_dropout) ... ok
+test_frozen_and_warmup_are_noops (test_core.CoreTests.test_frozen_and_warmup_are_noops) ... ok
+test_multiple_steps_response_has_nonzero_penalty (test_core.CoreTests.test_multiple_steps_response_has_nonzero_penalty) ... ok
+test_no_global_rng_consumption (test_core.CoreTests.test_no_global_rng_consumption) ... ok
+test_nonfinite_loss_rolls_back (test_core.CoreTests.test_nonfinite_loss_rolls_back) ... ok
+test_one_step_response_exactly_matches_obs (test_core.CoreTests.test_one_step_response_exactly_matches_obs) ... ok
+test_query_shape_rejected (test_core.CoreTests.test_query_shape_rejected) ... ok
+test_regularization_changes_update_after_first_step (test_core.CoreTests.test_regularization_changes_update_after_first_step) ... ok
+test_relative_response_change_is_penalized (test_core.CoreTests.test_relative_response_change_is_penalized) ... ok
+test_reset_restores_parameters_buffers_and_adam (test_core.CoreTests.test_reset_restores_parameters_buffers_and_adam) ... ok
+test_rollout_matches_independent_reference (test_core.CoreTests.test_rollout_matches_independent_reference) ... ok
+test_rollout_preserves_autoregressive_gradients (test_core.CoreTests.test_rollout_preserves_autoregressive_gradients) ... ok
+test_single_query_rejected (test_core.CoreTests.test_single_query_rejected) ... ok
+test_ambiguous_directory_rejected (test_runner_utils.RunnerUtilityTests.test_ambiguous_directory_rejected) ... ok
+test_checkpoint_directory_unique_resolution (test_runner_utils.RunnerUtilityTests.test_checkpoint_directory_unique_resolution) ... ok
+test_explicit_checkpoint_and_suffix (test_runner_utils.RunnerUtilityTests.test_explicit_checkpoint_and_suffix) ... ok
+test_json_preserves_metrics_and_replaces_nonfinite (test_runner_utils.RunnerUtilityTests.test_json_preserves_metrics_and_replaces_nonfinite) ... ok
+test_missing_checkpoint_rejected (test_runner_utils.RunnerUtilityTests.test_missing_checkpoint_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 34 tests in 1.217s
+
+OK
