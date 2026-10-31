@@ -132,6 +132,27 @@ def load_cases(path: str | None, dataset, eval_api, cfg, count: int, seed: int):
             'cases': [{'episode': int(eps[i]), 'start': int(steps[i])} for i in ids]}
 
 
+
+def evaluate_case(world: Any, dataset: Any, *, case: dict[str, int],
+                  goal_offset_steps: int, eval_budget: int, callables: Any,
+                  out_dir: Path, mode: str, case_index: int) -> Any:
+    """Call the existing SWM evaluator without writing rollout videos.
+
+    Legacy SWM defaults save_video=True and constructs Path(video_path).
+    None is not a disable-video flag. Supply both the explicit switch and a
+    real, case-specific path so no branch of the evaluator receives None.
+    Metrics and all control arguments are forwarded without modification.
+    """
+    if mode not in MODES or type(case_index) is not int or case_index < 0:
+        raise ValueError("Invalid mode/case_index for evaluation output path")
+    video_dir = Path(out_dir).resolve() / 'videos' / f'{mode}_case{case_index:04d}'
+    return world.evaluate_from_dataset(
+        dataset, start_steps=[case['start']], episodes_idx=[case['episode']],
+        goal_offset_steps=goal_offset_steps, eval_budget=eval_budget,
+        callables=callables, save_video=False, video_path=str(video_dir),
+    )
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     source = ap.add_mutually_exclusive_group(required=True)
@@ -241,6 +262,7 @@ def main():
             'policy': policy_name, 'core_module_path': core_path,
             'config': OmegaConf.to_container(cfg, resolve=True), 'adaptation': adapt_cfg.to_dict(),
             'versions': versions,
+            'video_recording': {'save_video': False, 'video_path_policy': 'per_mode_per_case_non_null'},
             'source_sha256': {str(p.relative_to(repo)): sha256(p) for p in [repo / 'jepa.py', repo / 'eval.py',
                              repo / 'config/eval/pusht.yaml', repo / 'config/eval/solver/cem.yaml'] if p.exists()},
             'policy_source_file': inspect.getfile(swm.policy.WorldModelPolicy),
@@ -272,10 +294,11 @@ def main():
                     # Fresh world per case and mode avoids stateful RNG carryover.
                     world = swm.World(**cfg.world, image_shape=(224, 224))
                     world.set_policy(policy)
-                    metrics = world.evaluate_from_dataset(
-                        dataset, start_steps=[case['start']], episodes_idx=[case['episode']],
+                    metrics = evaluate_case(
+                        world, dataset, case=case,
                         goal_offset_steps=int(cfg.eval.goal_offset_steps), eval_budget=args.eval_budget,
-                        callables=OmegaConf.to_container(cfg.eval.get('callables'), resolve=True), video_path=None)
+                        callables=OmegaConf.to_container(cfg.eval.get('callables'), resolve=True),
+                        out_dir=args.out, mode=mode, case_index=index)
                     synchronize(adapter.device)
                     elapsed = time.perf_counter() - started
                     adapter.assert_frozen_unchanged()

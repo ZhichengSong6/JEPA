@@ -27,6 +27,10 @@ test_reset_restores_parameters_buffers_and_adam (test_core.CoreTests.test_reset_
 test_rollout_matches_independent_reference (test_core.CoreTests.test_rollout_matches_independent_reference) ... ok
 test_rollout_preserves_autoregressive_gradients (test_core.CoreTests.test_rollout_preserves_autoregressive_gradients) ... ok
 test_single_query_rejected (test_core.CoreTests.test_single_query_rejected) ... ok
+test_case_and_mode_video_paths_are_distinct (test_runner_utils.EvaluationCallTests.test_case_and_mode_video_paths_are_distinct) ... ok
+test_evaluation_failure_propagates_without_retry (test_runner_utils.EvaluationCallTests.test_evaluation_failure_propagates_without_retry) ... ok
+test_legacy_path_conversion_with_explicit_video_disabled (test_runner_utils.EvaluationCallTests.test_legacy_path_conversion_with_explicit_video_disabled) ... ok
+test_runner_uses_the_tested_evaluation_helper (test_runner_utils.EvaluationCallTests.test_runner_uses_the_tested_evaluation_helper) ... ok
 test_ambiguous_directory_rejected (test_runner_utils.RunnerUtilityTests.test_ambiguous_directory_rejected) ... ok
 test_checkpoint_directory_unique_resolution (test_runner_utils.RunnerUtilityTests.test_checkpoint_directory_unique_resolution) ... ok
 test_explicit_checkpoint_and_suffix (test_runner_utils.RunnerUtilityTests.test_explicit_checkpoint_and_suffix) ... ok
@@ -34,6 +38,6 @@ test_json_preserves_metrics_and_replaces_nonfinite (test_runner_utils.RunnerUtil
 test_missing_checkpoint_rejected (test_runner_utils.RunnerUtilityTests.test_missing_checkpoint_rejected) ... ok
 
 ----------------------------------------------------------------------
-Ran 34 tests in 1.217s
+Ran 38 tests in 1.455s
 
 OK

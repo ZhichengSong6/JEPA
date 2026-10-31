@@ -1,6 +1,6 @@
 {
-  "version": "0.1.0",
-  "unit_tests": 34,
+  "version": "0.1.1",
+  "unit_tests": 38,
   "unit_test_result": "passed",
   "validation_runtime": {
     "python": "3.13.5",
@@ -9,10 +9,16 @@
   },
   "shell_syntax_check": "passed",
   "cli_help_check": "passed",
+  "python_compile_check": "passed",
   "real_checkpoint_loaded": false,
   "real_swm_environment_tested": false,
   "gpu_tested": false,
   "slurm_submitted": false,
-  "github_pushed": false,
-  "scope": "New sequential paired PushT pilot; not the historical benchmark; no physics perturbation implemented"
+  "reported_server_failure": {
+    "job_id": 18840,
+    "error": "Path(video_path) received None",
+    "status": "failed"
+  },
+  "fix": "Explicit save_video=False and non-null per-mode/per-case video_path",
+  "scope": "CPU regression tests with an SWM API test double; server rerun is required"
 }
