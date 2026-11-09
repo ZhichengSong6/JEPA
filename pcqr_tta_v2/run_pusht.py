@@ -328,19 +328,32 @@ def main():
                     synchronize(adapter.device)
                     elapsed = time.perf_counter() - started
                     adapter.assert_frozen_unchanged()
-                    if policy.initial_fingerprint is None or cost.replans < 2:
-                        raise RuntimeError('Evaluation returned without first feedback-driven replan')
-                    if len(cost.replan_audits) != 2:
-                        raise RuntimeError('Expected pre-update audit for first TWO CEM plans')
+                    if policy.initial_fingerprint is None or cost.replans < 1:
+                        raise RuntimeError('Evaluation returned without a policy replan')
+                    if len(cost.replan_audits) != min(2, cost.replans):
+                        raise RuntimeError('Pre-update audit missing from CEM replan')
                     expected_raw_steps = int(cfg.plan_config.receding_horizon) * int(cfg.plan_config.action_block)
-                    if cost.replan_audits[0]['raw_steps'] != 0 or cost.replan_audits[1]['raw_steps'] != expected_raw_steps:
+                    if cost.replan_audits[0]['raw_steps'] != 0:
+                        raise RuntimeError('First planning did not occur at raw step zero')
+                    first_feedback_audit = cost.replan_audits[1] if cost.replans >= 2 else None
+                    if (first_feedback_audit is not None
+                            and first_feedback_audit['raw_steps'] != expected_raw_steps):
                         raise RuntimeError('First feedback arrived at unexpected raw step count')
+                    # Early-success episodes may never need to replan. Retain them
+                    # in intention-to-treat metrics and audit the no-feedback status.
                     audits = {'first_plan': cost.replan_audits[0],
-                              'first_feedback_replan': cost.replan_audits[1]}
+                              'first_feedback_replan': first_feedback_audit}
                     audit_mismatch = {}
                     if index in first_audit_reference:
                         for phase in audits:
-                            differences = compare_preupdate(first_audit_reference[index][phase], audits[phase])
+                            ref_audit, new_audit = first_audit_reference[index][phase], audits[phase]
+                            if ref_audit is None or new_audit is None:
+                                if (ref_audit is None) != (new_audit is None):
+                                    audit_mismatch[phase] = {
+                                        'reference_available': ref_audit is not None,
+                                        'observed_available': new_audit is not None}
+                                continue
+                            differences = compare_preupdate(ref_audit, new_audit)
                             if differences:
                                 audit_mismatch[phase] = differences
                     else:
@@ -356,6 +369,7 @@ def main():
                     row = {'mode': mode, 'case_index': index, **case, 'case_seed': case_seed,
                            'first_plan_audit': audits['first_plan'],
                            'first_preupdate_audit': audits['first_feedback_replan'],
+                           'first_feedback_available': first_feedback_audit is not None,
                            'preupdate_mismatch': audit_mismatch,
                            'episode_wall_s': elapsed, 'policy_wall_ms': policy.online_wall_ms,
                            'adaptation_hook_ms': cost.adapt_ms, 'applied_optimizer_steps': cost.applied_steps,
@@ -387,6 +401,8 @@ def main():
         dump(args.out / 'COMPLETE.json', {'status': 'completed', 'case_results': len(rows),
                                           'paired_initials_verified': True,
                                           'first_preupdate_verified': all_preupdate_verified,
+                                          'cases_without_feedback_replan': sum(
+                                              not row['first_feedback_available'] for row in rows),
                                           'audit_policy': args.audit_policy,
                                           'receding_horizon': args.receding_horizon,
                                           'modes': args.modes,
