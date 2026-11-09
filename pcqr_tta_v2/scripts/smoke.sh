@@ -18,6 +18,8 @@ cd "$REPO"
 
 python -m unittest discover -s pcqr_tta_v1/tests -q
 python -m unittest discover -s pcqr_tta_v2/tests -q
+# Catch v2 runner import/argparse errors before reserving a long GPU evaluation.
+python -m pcqr_tta_v2.run_pusht --help >/dev/null
 python -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable"; print("GPU:", torch.cuda.get_device_name(0))'
 
 OUT_DIR="${OUT_DIR:-$STABLEWM_HOME/pcqr_tta_v2_runs/pilot_${SLURM_JOB_ID:-local}_$(date +%Y%m%d_%H%M%S)}"
