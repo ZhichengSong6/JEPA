@@ -125,7 +125,7 @@ def make_audited_policy_class(base_policy_class, online_factory=None):
             self.online_cost.raw_steps_seen = len(self.online_cost.issued_actions)
             # A read-only reference valid until the synchronous CEM call; the
             # numerical probe clones it before this environment step advances.
-            if self.online_cost.trace_dir is not None:
+            if getattr(self.online_cost, 'trace_dir', None) is not None:
                 self.online_cost.current_raw_info = info_dict
             action = super().get_action(info_dict, **kwargs)
             # Only need the prefix through the first feedback-driven replan.
