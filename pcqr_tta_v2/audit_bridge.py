@@ -71,6 +71,9 @@ def make_audited_cost_class(base_cost_class=None):
             self.issued_actions: list[Any] = []
             self.raw_steps_seen = 0
             self.replan_audits: list[dict] = []
+            self.trace_dir = None  # optional, diagnostic; no effect on CEM/model
+            self.trace_prefix = None
+            self.current_raw_info = None
 
         def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
             # self.armed is True once per solver invocation, exactly before
@@ -91,6 +94,16 @@ def make_audited_cost_class(base_cost_class=None):
                     'first_cem_population_sha256': _bytes_digest(action_candidates[0]),
                     'selected_parameters_sha256': parameters_sha256(self.adapter.named),
                 }
+                if self.trace_dir is not None:
+                    from .trace_audit import save_before_update
+                    trace = save_before_update(
+                        self.trace_dir, self.trace_prefix, self.replans,
+                        solver_info=info_dict,
+                        candidates=action_candidates,
+                        issued_actions=self.issued_actions,
+                        raw_info=self.current_raw_info,
+                    )
+                    audit['numeric_trace_file'] = str(trace)
                 self.replan_audits.append(audit)
                 if self.log is not None:
                     self.log({'type': 'preupdate_audit', **audit})
@@ -110,6 +123,10 @@ def make_audited_policy_class(base_policy_class, online_factory=None):
             # The next get_cost() may be the first CEM call at a replan.
             # At that point, all actions here were already returned by policy.
             self.online_cost.raw_steps_seen = len(self.online_cost.issued_actions)
+            # A read-only reference valid until the synchronous CEM call; the
+            # numerical probe clones it before this environment step advances.
+            if self.online_cost.trace_dir is not None:
+                self.online_cost.current_raw_info = info_dict
             action = super().get_action(info_dict, **kwargs)
             # Only need the prefix through the first feedback-driven replan.
             n_keep = int(self.cfg.receding_horizon) * int(self.cfg.action_block) + 1
