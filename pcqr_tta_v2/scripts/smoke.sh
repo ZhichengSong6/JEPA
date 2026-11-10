@@ -29,6 +29,8 @@ source_args=(--policy-dir "$POLICY_DIR")
 if [[ -n "${POLICY:-}" ]]; then source_args=(--policy "$POLICY"); fi
 case_args=()
 if [[ -n "${CASES:-}" ]]; then case_args=(--cases "$CASES"); fi
+trace_args=()
+if [[ "${TRACE_FIRST_TWO:-0}" == "1" ]]; then trace_args=(--trace-first-two); fi
 
 python -m pcqr_tta_v2.run_pusht \
   --repo "$REPO" "${source_args[@]}" --out "$OUT_DIR" \
@@ -36,6 +38,6 @@ python -m pcqr_tta_v2.run_pusht \
   --budget "${BUDGET:-1000}" --seed "${SEED:-1729}" \
   --eval-budget "${EVAL_BUDGET:-50}" --receding-horizon "${RH:-1}" \
   --audit-policy "${AUDIT_POLICY:-strict}" \
-  --device cuda "${case_args[@]}"
+  --device cuda "${case_args[@]}" "${trace_args[@]}"
 
 echo "Results: $OUT_DIR"
