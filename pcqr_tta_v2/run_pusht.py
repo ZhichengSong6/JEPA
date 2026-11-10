@@ -178,6 +178,8 @@ def main():
                     help='Executed planning blocks before replan (v2 default 1, v1 was 5)')
     ap.add_argument('--audit-policy', choices=['strict', 'record'], default='strict',
                     help='Strict aborts if first pre-update trajectories/queries differ')
+    ap.add_argument('--trace-first-two', action='store_true',
+                    help='Save read-only raw/state/pixel/CEM numeric snapshots for first two plans')
     args = ap.parse_args()
     if args.num_cases < 1 or args.eval_budget < 1 or len(set(args.modes)) != len(args.modes):
         ap.error('Require positive case count and budget, and no duplicate modes')
@@ -281,6 +283,7 @@ def main():
             'video_recording': {'save_video': False, 'video_path_policy': 'per_mode_per_case_non_null'},
             'v2_protocol': {'version': 'v2', 'receding_horizon': args.receding_horizon,
                             'audit_policy': args.audit_policy,
+                            'trace_first_two': args.trace_first_two,
                             'cem_budget_is_per_replan': True,
                             'dynamics_shift': 'none'},
             'v2_source_sha256': {
@@ -313,6 +316,9 @@ def main():
                 world = None
                 try:
                     cost = AuditedCostModel(model, adapter, log=logger)
+                    if args.trace_first_two:
+                        cost.trace_dir = args.out / 'numeric_traces'
+                        cost.trace_prefix = f'{mode}_case{index:04d}'
                     solver = hydra.utils.instantiate(cfg.solver, model=cost)
                     policy = policy_cls(solver=solver, config=swm.PlanConfig(**cfg.plan_config),
                                         process=process, transform=transform, online_cost=cost,
