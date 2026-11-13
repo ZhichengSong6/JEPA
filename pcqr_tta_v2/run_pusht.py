@@ -30,6 +30,7 @@ import torch
 from pcqr_tta_v1.core import AdaptConfig, MODES, OnlineAdapter, find_lewm, synchronize
 from pcqr_tta_v1.swm_bridge import JSONLLogger
 from .audit_bridge import compare_preupdate, make_audited_cost_class, make_audited_policy_class
+from .pusht_reset import RESET_MODES, scoped_pusht_reset
 
 AuditedCostModel = make_audited_cost_class()
 
@@ -180,6 +181,8 @@ def main():
                     help='Strict aborts if first pre-update trajectories/queries differ')
     ap.add_argument('--trace-first-two', action='store_true',
                     help='Save read-only raw/state/pixel/CEM numeric snapshots for first two plans')
+    ap.add_argument('--pusht-reset-mode', choices=RESET_MODES, default='legacy',
+                    help='legacy unchanged; fresh_dynamics clears hidden block dynamics and omits reset physics steps')
     args = ap.parse_args()
     if args.num_cases < 1 or args.eval_budget < 1 or len(set(args.modes)) != len(args.modes):
         ap.error('Require positive case count and budget, and no duplicate modes')
@@ -284,11 +287,14 @@ def main():
             'v2_protocol': {'version': 'v2', 'receding_horizon': args.receding_horizon,
                             'audit_policy': args.audit_policy,
                             'trace_first_two': args.trace_first_two,
+                            'pusht_reset_mode': args.pusht_reset_mode,
                             'cem_budget_is_per_replan': True,
                             'dynamics_shift': 'none'},
             'v2_source_sha256': {
                 'pcqr_tta_v2/run_pusht.py': sha256(Path(__file__)),
                 'pcqr_tta_v2/audit_bridge.py': sha256(Path(__file__).parent / 'audit_bridge.py'),
+                'pcqr_tta_v2/pusht_reset.py': sha256(Path(__file__).parent / 'pusht_reset.py'),
+                'pcqr_tta_v2/trace_audit.py': sha256(Path(__file__).parent / 'trace_audit.py'),
             },
             'source_sha256': {str(p.relative_to(repo)): sha256(p) for p in [repo / 'jepa.py', repo / 'eval.py',
                              repo / 'config/eval/pusht.yaml', repo / 'config/eval/solver/cem.yaml'] if p.exists()},
@@ -326,11 +332,18 @@ def main():
                     # Fresh world per case and mode avoids stateful RNG carryover.
                     world = swm.World(**cfg.world, image_shape=(224, 224))
                     world.set_policy(policy)
-                    metrics = evaluate_case(
-                        world, dataset, case=case,
-                        goal_offset_steps=int(cfg.eval.goal_offset_steps), eval_budget=args.eval_budget,
-                        callables=OmegaConf.to_container(cfg.eval.get('callables'), resolve=True),
-                        out_dir=args.out, mode=mode, case_index=index)
+                    # New physical-reset protocol is scoped to this one world/case;
+                    # always restore the original _set_state even on failure.
+                    with scoped_pusht_reset(world, args.pusht_reset_mode) as reset_probe:
+                        cost.physics_probe = reset_probe.snapshot
+                        metrics = evaluate_case(
+                            world, dataset, case=case,
+                            goal_offset_steps=int(cfg.eval.goal_offset_steps), eval_budget=args.eval_budget,
+                            callables=OmegaConf.to_container(cfg.eval.get('callables'), resolve=True),
+                            out_dir=args.out, mode=mode, case_index=index)
+                        reset_patch_calls = reset_probe.patches_applied
+                        if args.pusht_reset_mode == 'fresh_dynamics' and reset_patch_calls < 2:
+                            raise RuntimeError('Fresh dynamics reset did not run during SWM dataset evaluation')
                     synchronize(adapter.device)
                     elapsed = time.perf_counter() - started
                     adapter.assert_frozen_unchanged()
@@ -373,6 +386,8 @@ def main():
                                                f'mode {mode}: {audit_mismatch}')
                     fingerprints.setdefault(index, policy.initial_fingerprint)
                     row = {'mode': mode, 'case_index': index, **case, 'case_seed': case_seed,
+                           'pusht_reset_mode': args.pusht_reset_mode,
+                           'reset_patch_calls': reset_patch_calls,
                            'first_plan_audit': audits['first_plan'],
                            'first_preupdate_audit': audits['first_feedback_replan'],
                            'first_feedback_available': first_feedback_audit is not None,
@@ -411,6 +426,7 @@ def main():
                                               not row['first_feedback_available'] for row in rows),
                                           'audit_policy': args.audit_policy,
                                           'receding_horizon': args.receding_horizon,
+                                          'pusht_reset_mode': args.pusht_reset_mode,
                                           'modes': args.modes,
                                           'note': 'Raw metrics preserved without guessing success-rate units.'})
     except Exception as exc:
