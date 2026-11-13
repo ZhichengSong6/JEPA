@@ -18,6 +18,7 @@ AUDIT_KEYS = (
     "current_replan_pixels_sha256",
     "first_cem_population_sha256",
     "selected_parameters_sha256",
+    "physics_hidden_sha256",
 )
 
 
@@ -74,6 +75,7 @@ def make_audited_cost_class(base_cost_class=None):
             self.trace_dir = None  # optional, diagnostic; no effect on CEM/model
             self.trace_prefix = None
             self.current_raw_info = None
+            self.physics_probe = None
 
         def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
             # self.armed is True once per solver invocation, exactly before
@@ -94,6 +96,12 @@ def make_audited_cost_class(base_cost_class=None):
                     'first_cem_population_sha256': _bytes_digest(action_candidates[0]),
                     'selected_parameters_sha256': parameters_sha256(self.adapter.named),
                 }
+                physical = None
+                if self.physics_probe is not None:
+                    from .pusht_reset import physics_hidden_sha256
+                    physical = self.physics_probe()
+                    audit["physics_hidden_sha256"] = physics_hidden_sha256(physical)
+                    audit["physics_state"] = physical
                 if self.trace_dir is not None:
                     from .trace_audit import save_before_update
                     trace = save_before_update(
@@ -102,6 +110,7 @@ def make_audited_cost_class(base_cost_class=None):
                         candidates=action_candidates,
                         issued_actions=self.issued_actions,
                         raw_info=self.current_raw_info,
+                        physics_snapshot=physical,
                     )
                     audit['numeric_trace_file'] = str(trace)
                 self.replan_audits.append(audit)
