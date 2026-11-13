@@ -33,6 +33,7 @@ def save_before_update(
     candidates,
     issued_actions: list,
     raw_info: dict | None = None,
+    physics_snapshot: dict | None = None,
 ) -> Path:
     """Exclusively create a per-mode/case/replan .npz (allow_pickle=False)."""
     if not label or not all(c.isascii() and (c.isalnum() or c in "-_") for c in label):
@@ -66,6 +67,11 @@ def save_before_update(
         arr = as_numeric_array(value)
         if arr is not None:
             data[f"env_{name}"] = arr
+
+    for name, value in (physics_snapshot or {}).items():
+        arr = as_numeric_array(value)
+        if arr is not None:
+            data[f"physics_{name}"] = arr
 
     action_rows = [as_numeric_array(a).reshape(-1) for a in issued_actions]
     if action_rows:
