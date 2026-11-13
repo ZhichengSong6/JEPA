@@ -38,6 +38,7 @@ python -m pcqr_tta_v2.run_pusht \
   --budget "${BUDGET:-1000}" --seed "${SEED:-1729}" \
   --eval-budget "${EVAL_BUDGET:-50}" --receding-horizon "${RH:-1}" \
   --audit-policy "${AUDIT_POLICY:-strict}" \
+  --pusht-reset-mode "${PUSHT_RESET_MODE:-legacy}" \
   --device cuda "${case_args[@]}" "${trace_args[@]}"
 
 echo "Results: $OUT_DIR"
